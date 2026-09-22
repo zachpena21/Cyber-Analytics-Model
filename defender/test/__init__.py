@@ -11,9 +11,14 @@ import json
 import numpy as np
 import os
 
+try:
+    import pyzipper
+except ImportError:  # standard ZIPs still work without the optional AES reader
+    pyzipper = None
+
 MAXFILESIZE = 2**21  # 2 MiB
 TIMEOUT = 5
-ZIP_PASSWORDS = [b'', b'infected']
+ZIP_PASSWORDS = [b'infected', None, b'']
 
 # TINY PE FILES
 MZHEADER = b'MZ'
@@ -40,21 +45,24 @@ def file_bytes_generator(location, maxsize, return_filename=True):
     path = pathlib.Path(location)
     if path.is_file():
         if location.lower().endswith('.zip'):
-            pwd_ix = 0
-            with zipfile.ZipFile(location, 'r') as f:
+            zip_reader = pyzipper.AESZipFile if pyzipper is not None else zipfile.ZipFile
+            with zip_reader(location, 'r') as f:
                 for info in f.infolist():
                     if info.file_size <= maxsize:
-                        while True:
+                        content = None
+                        last_error = None
+                        for password in ZIP_PASSWORDS:
                             try:
-                                content = f.read(
-                                    info.filename, pwd=ZIP_PASSWORDS[pwd_ix])
-                            except RuntimeError:
-                                pwd_ix += 1
-                                if pwd_ix >= len(ZIP_PASSWORDS):
-                                    raise Exception(
-                                        f"Unable to guess ZIP encryption passwords for {location}")
+                                content = f.read(info.filename, pwd=password)
+                            except (RuntimeError, NotImplementedError) as error:
+                                last_error = error
                             else:
                                 break
+                        if content is None:
+                            raise Exception(
+                                f"Unable to read encrypted ZIP member {info.filename} "
+                                f"from {location}: {last_error}"
+                            )
 
                         if content.startswith(b'MZ'):
                             yield (os.path.join(location, info.filename), content) if return_filename else content
@@ -69,10 +77,23 @@ def file_bytes_generator(location, maxsize, return_filename=True):
                             if content.startswith(b'MZ'):
                                 yield (os.path.join(location, member.name), content) if return_filename else content
 
+        else:
+            try:
+                content = path.read_bytes()
+                if len(content) <= maxsize and content.startswith(b'MZ'):
+                    yield (str(path), content) if return_filename else content
+            except PermissionError:
+                return
+
     elif path.is_dir():
-        for filepath in path.glob('*'):
+        for filepath in sorted(path.iterdir()):
             fileobj = pathlib.Path(filepath)
-            if fileobj.is_file() and fileobj.stat().st_size <= maxsize:
+            if fileobj.is_dir() or fileobj.name.lower().endswith(
+                    ('.zip', '.tar', '.tar.bz2', '.tar.gz', '.tgz')):
+                yield from file_bytes_generator(
+                    str(fileobj), maxsize, return_filename=return_filename
+                )
+            elif fileobj.is_file() and fileobj.stat().st_size <= maxsize:
                 try:
                     with open(filepath, 'rb') as infile:
                         content = infile.read()
@@ -206,4 +227,3 @@ if __name__ == '__main__':
                     print(f'{zfn}/{info.filename} -> {outname}')
                     with open(outname,'wb') as outf:
                         outf.write(content)
-                    

@@ -7,3 +7,4 @@ defender/defender/models/*.pkl.gz
 defender/defender/models/compact/
 *.tar
 *.tar.gz
+validation-data/

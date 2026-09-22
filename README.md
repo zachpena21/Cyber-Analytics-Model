@@ -93,6 +93,59 @@ Freeze the selected threshold before reporting FPR/TPR. Because 1% is a tight
 constraint, use enough benign samples to make the estimate meaningful; 100
 benign samples allow only one false positive and provide a very noisy estimate.
 
+## MalwareBazaar validation workflow
+
+MalwareBazaar contains live malware. Obtain instructor/institutional approval
+and use a disposable VM with shared folders and clipboard disabled. Never run
+this workflow on a normal workstation, execute a sample, extract samples to a
+shared location, or commit validation data to Git. The project ignores the
+entire `validation-data/` directory.
+
+1. Obtain a free Auth-Key from <https://auth.abuse.ch/> and review the
+   [MalwareBazaar API and fair-use terms](https://bazaar.abuse.ch/api/).
+2. In the isolated VM, install the updated evaluator dependencies:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m pip install -r .\defender\requirements.txt
+   ```
+
+3. Put the key only in the current process environment without writing it into
+   source code or PowerShell history:
+
+   ```powershell
+   $secureKey = Read-Host "MalwareBazaar Auth-Key" -AsSecureString
+   $env:MALWAREBAZAAR_AUTH_KEY = [Net.NetworkCredential]::new('', $secureKey).Password
+   ```
+
+4. Start with 100 encrypted PE archives:
+
+   ```powershell
+   .\.venv\Scripts\python.exe .\scripts\download_malwarebazaar.py --count 100 --acknowledge-live-malware
+   ```
+
+   The downloader requests `file_type=exe`, records collection metadata and
+   hashes in `manifest.json`, and never extracts a sample. Downloads remain in
+   their AES-encrypted ZIPs. MalwareBazaar uses the password `infected`.
+
+5. With the defense container running, evaluate the encrypted archive directory
+   directly in memory:
+
+   ```powershell
+   cd defender
+   ..\.venv\Scripts\python.exe -m test -m ..\validation-data\malwarebazaar -b C:\Windows\System32 --max 16777216 --stopafter 5000
+   ```
+
+6. Remove the Auth-Key from the process when finished:
+
+   ```powershell
+   Remove-Item Env:MALWAREBAZAAR_AUTH_KEY
+   ```
+
+Use the first collection only for pipeline testing and provisional threshold
+selection. Collect a separate later set for final reporting so that threshold
+selection and evaluation do not reuse the same malware samples. MalwareBazaar
+is an external stress test and may not match the hidden course distribution.
+
 ## Hardening already applied
 
 - Pins the legacy dependency versions needed to deserialize the provided model.
