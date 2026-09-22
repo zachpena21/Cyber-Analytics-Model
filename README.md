@@ -146,6 +146,32 @@ selection. Collect a separate later set for final reporting so that threshold
 selection and evaluation do not reuse the same malware samples. MalwareBazaar
 is an external stress test and may not match the hidden course distribution.
 
+## MalShare fallback workflow
+
+If MalwareBazaar is unavailable, MalShare can provide a provisional pipeline
+test. MalShare states that not every hosted file is necessarily malicious, so
+do not treat this collection as the final ground-truth TPR set. Keep the same
+disposable-VM isolation used above.
+
+The downloader validates the returned hash and PE signature in memory, then
+writes the sample directly into an AES-256 encrypted ZIP. It never writes a
+plaintext executable.
+
+```bash
+cd "$HOME/Cyber-Analytics-Model"
+source .venv/bin/activate
+read -rsp "MalShare API key: " MALSHARE_API_KEY
+echo
+export MALSHARE_API_KEY
+python scripts/download_malshare.py --count 25 --acknowledge-live-malware
+unset MALSHARE_API_KEY
+```
+
+Encrypted archives and their manifest are saved under
+`validation-data/malshare/`. Evaluate that directory with the same in-memory
+archive reader used for MalwareBazaar, but label the resulting recall as
+provisional MalShare validation rather than final test performance.
+
 ## Hardening already applied
 
 - Pins the legacy dependency versions needed to deserialize the provided model.
