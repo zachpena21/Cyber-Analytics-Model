@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+defender/defender/models/*.pkl
+defender/defender/models/*.pkl.gz
+defender/defender/models/compact/
+*.tar
+*.tar.gz
