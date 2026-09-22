@@ -1,6 +1,6 @@
 # Black-Box Malware Defense Baseline
 
-This branch turns the 2021 MLSEC `NeedForSpeedModel` sample into a hardened,
+This repository turns the 2021 MLSEC `NeedForSpeedModel` sample into a hardened,
 reproducible starting point for the course's first milestone. The original
 sklearn forest requires about 2.0 GiB resident memory when loaded, so the build
 converts it into memory-mapped inference arrays that preserve its predictions.

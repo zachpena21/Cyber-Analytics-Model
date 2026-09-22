@@ -1,2 +1,0 @@
-# Attacker Challenge
-Coming soon!
