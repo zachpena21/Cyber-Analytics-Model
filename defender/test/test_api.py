@@ -38,6 +38,21 @@ class FakeAdaptedModel(FakeModel):
         )
 
 
+class FakePolicyAwareAdaptedModel:
+    adapter_threshold = 0.8
+
+    def __init__(self, benign_probability=0.51):
+        self.benign_probability = benign_probability
+        self.base_trigger = None
+
+    def extract_base_components(self, _frame):
+        return np.array([self.benign_probability]), np.array([[1.0]])
+
+    def score_adapter(self, _features, base_trigger):
+        self.base_trigger = bool(base_trigger[0])
+        return np.array([0.9 if self.base_trigger else 0.1])
+
+
 class ApiTests(unittest.TestCase):
     def setUp(self):
         self.app = create_app(FakeModel(), 0.75)
@@ -126,6 +141,34 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.get_json(), {"result": 1})
         signature_check.assert_not_called()
+
+
+
+    @patch("defender.apps.has_verified_microsoft_signature", return_value=True)
+    @patch("defender.apps.PEAttributeExtractor", FakeExtractor)
+    def test_signature_adjusts_legacy_feature_before_adapter(
+        self, signature_check
+    ):
+        model = FakePolicyAwareAdaptedModel()
+        app = create_app(model, 0.510001)
+        response = app.test_client().post(
+            "/", data=b"MZsigned", content_type="application/octet-stream"
+        )
+        self.assertEqual(response.get_json(), {"result": 0})
+        self.assertFalse(model.base_trigger)
+        signature_check.assert_called_once_with(b"MZsigned")
+
+    @patch("defender.apps.has_verified_microsoft_signature", return_value=False)
+    @patch("defender.apps.PEAttributeExtractor", FakeExtractor)
+    def test_untrusted_legacy_feature_remains_triggered(self, signature_check):
+        model = FakePolicyAwareAdaptedModel()
+        app = create_app(model, 0.510001)
+        response = app.test_client().post(
+            "/", data=b"MZunsigned", content_type="application/octet-stream"
+        )
+        self.assertEqual(response.get_json(), {"result": 1})
+        self.assertTrue(model.base_trigger)
+        signature_check.assert_called_once_with(b"MZunsigned")
 
 
 if __name__ == "__main__":
