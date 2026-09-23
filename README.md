@@ -224,8 +224,8 @@ service verifies that `DF_MODEL_THRESH` matches the base threshold recorded
 during training. The current deployment uses:
 
 - base benign threshold: `0.510001`
-- adapter threshold: `0.4836661988928846`
-- decision policy: `adapter_with_legacy_verdict_feature`
+- adapter threshold: `0.70`
+- decision policy: `adapter_with_signature_adjusted_legacy_verdict_feature`
 
 ### Development-data collection
 
@@ -281,24 +281,34 @@ external evaluation.
 
 ### Current measured status
 
-The deployed v3 adapter was trained from 99 development malware samples and
-2,831 signed benign samples. Its source-aware development measurements were:
+The v3 adapter was trained from 99 development malware samples and 2,831
+signed benign samples. Its source-aware development measurements were:
 
 - calibration: 100% TPR on 20 malware and 0.4% FPR on 500 benign files
 - within-run benign check: 0.2% FPR on 500 benign files
 
-A later external evaluation produced:
+The initial external service run detected 36/36 malware but flagged 34/1,000
+fresh signed benign files. A continuous-score audit of the same samples
+reproduced only 9/1,000 adapter false positives at the deployed threshold. This
+difference exposed training/serving skew in feature 250,042: training and
+offline scoring used the signature-adjusted legacy verdict, while production
+used the raw forest verdict.
 
-- 36/36 malware detected: 0% observed false-negative rate
-- 34/1,000 fresh signed benign files flagged: 3.4% false-positive rate
-- zero request errors
-- 75 ms average response time and 528 ms maximum response time
+The v4 inference path now applies the Microsoft signature policy to the legacy
+verdict feature before adapter scoring, matching training. The adapter remains
+the final decision and a signature cannot directly override an adapter malware
+verdict. The threshold was raised to `0.70`, between the highest non-flagged
+benign score (`0.674864`) and lowest malware score (`0.735824`). On the audit
+batch this projects:
 
-Therefore, the adapter currently meets the observed malware-detection and
-latency targets on these samples, but it does **not** yet meet the course's 1%
-external FPR target. The gap between within-run and later benign results
-indicates benign-distribution shift. Do not report the development FPR as final
-performance or tune repeatedly against the same external batch.
+- 36/36 malware detected: 100% observed TPR
+- 5/1,000 benign files flagged: 0.5% observed FPR
+- zero parser-skipped samples
+
+Because the audit batch selected this threshold, it is now development data.
+These figures are not final unbiased performance. Rebuild the service and
+verify the implementation on this batch, then collect new disjoint benign and
+malware samples for the final report.
 
 ### Analyze scores before changing the model
 
@@ -330,7 +340,7 @@ The second finds the strictest cutoff that still keeps observed TPR at or above
 95%. If no cutoff meets both constraints, threshold tuning alone is
 insufficient and the adapter needs a feature or classifier change.
 
-These diagnostic thresholds are selected using the audit batch, so applying
-one makes this batch development data. Do not report its resulting rates as a
-final unbiased measurement. After choosing an adjustment, collect new,
-disjoint benign and malware samples and freeze the model before the final test.
+These diagnostic thresholds are selected using the audit batch. The v4
+adjustment therefore makes this batch development data. Do not report its
+resulting rates as final unbiased performance. Collect new, disjoint benign
+and malware samples and freeze the model before the final test.
