@@ -77,7 +77,38 @@ def create_app(model, threshold: float) -> Flask:
             frame = pd.DataFrame([attributes])
             model = app.config["MODEL"]
             adapter_triggered = False
-            if hasattr(model, "predict_components"):
+            if hasattr(model, "extract_base_components") and hasattr(
+                model, "score_adapter"
+            ):
+                benign_values, features = model.extract_base_components(frame)
+                benign_probability = float(benign_values[0])
+                base_trigger = (
+                    benign_probability < app.config["MODEL_THRESHOLD"]
+                )
+                if (
+                    base_trigger
+                    and app.config["MICROSOFT_OVERRIDE_ENABLED"]
+                    and abs(
+                        benign_probability
+                        - app.config["MICROSOFT_OVERRIDE_SCORE"]
+                    )
+                    <= app.config["MICROSOFT_OVERRIDE_TOLERANCE"]
+                    and has_verified_microsoft_signature(bytez)
+                ):
+                    LOGGER.info(
+                        "trusted Microsoft legacy-feature override "
+                        "benign_probability=%.9f",
+                        benign_probability,
+                    )
+                    base_trigger = False
+                adapter_probability = float(
+                    model.score_adapter(features, [base_trigger])[0]
+                )
+                adapter_triggered = (
+                    adapter_probability >= model.adapter_threshold
+                )
+                result = int(adapter_triggered)
+            elif hasattr(model, "predict_components"):
                 benign_values, adapter_values = model.predict_components(frame)
                 benign_probability = float(benign_values[0])
                 adapter_probability = float(adapter_values[0])
