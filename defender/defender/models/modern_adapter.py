@@ -37,7 +37,8 @@ class ModernAdapterModel:
     def metadata(self):
         return self.base.metadata
 
-    def predict_components(self, data):
+    def extract_base_components(self, data):
+        """Return legacy benign probabilities and reusable PE features."""
         features = self.base.pipeline._extract_features(data)
         dense = (
             features.toarray()
@@ -48,24 +49,31 @@ class ModernAdapterModel:
         base_malware = np.empty(dense.shape[0], dtype=np.float64)
         for index, row in enumerate(dense):
             base_malware[index] = self.base._row_probability(row)
+        return 1.0 - base_malware, features
 
-        base_trigger = (
-            (1.0 - base_malware)
-            < float(self.adapter_metadata["base_benign_threshold"])
-        )
+    def score_adapter(self, features, base_trigger):
+        """Score using the policy-adjusted legacy verdict feature."""
+        base_trigger = np.asarray(base_trigger, dtype=np.float64).reshape(-1)
+        if features.shape[0] != base_trigger.size:
+            raise ValueError("base verdict count does not match feature rows")
         adapter_features = sparse.hstack(
             (
                 features,
-                sparse.csr_matrix(
-                    base_trigger.astype(np.float64).reshape(-1, 1)
-                ),
+                sparse.csr_matrix(base_trigger.reshape(-1, 1)),
             ),
             format="csr",
         )
         logits = np.asarray(adapter_features @ self.coefficients).reshape(-1)
         logits = np.clip(logits + self.intercept, -40.0, 40.0)
-        adapter_malware = 1.0 / (1.0 + np.exp(-logits))
-        return 1.0 - base_malware, adapter_malware
+        return 1.0 / (1.0 + np.exp(-logits))
+
+    def predict_components(self, data):
+        """Score with the raw legacy verdict without policy context."""
+        benign, features = self.extract_base_components(data)
+        base_trigger = benign < float(
+            self.adapter_metadata["base_benign_threshold"]
+        )
+        return benign, self.score_adapter(features, base_trigger)
 
     def predict_proba(self, data):
         """Return legacy probabilities for callers that do not know the adapter."""
