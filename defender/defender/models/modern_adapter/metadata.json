@@ -1,5 +1,5 @@
 {
-  "adapter_threshold": 0.4836661988928846,
+  "adapter_threshold": 0.7,
   "alpha": 0.001,
   "base_benign_threshold": 0.510001,
   "base_feature_count": 250041,
@@ -7,12 +7,12 @@
   "calibration": {
     "benign": 500,
     "count": 520,
-    "fnr": 0.0,
+    "fnr": 0,
     "fpr": 0.004,
     "malicious": 20,
-    "tpr": 1.0
+    "tpr": 1
   },
-  "decision_policy": "adapter_with_legacy_verdict_feature",
+  "decision_policy": "adapter_with_signature_adjusted_legacy_verdict_feature",
   "feature_count": 250042,
   "format_version": 1,
   "holdout_test": {
@@ -45,5 +45,24 @@
     "test": 500,
     "train": 1910
   },
-  "split_strategy": "source_aware_newest_benign_held_out"
+  "split_strategy": "source_aware_newest_benign_held_out",
+  "threshold_adjustment": {
+    "date": "2026-09-23",
+    "previous_threshold": 0.4836661988928846,
+    "selected_threshold": 0.7,
+    "selection_basis": "external audit batch promoted to development data",
+    "audit_samples": {
+      "benign": 1000,
+      "malicious": 36,
+      "parser_skipped": 0
+    },
+    "audit_rates_at_selected_threshold": {
+      "fpr": 0.005,
+      "fnr": 0,
+      "tpr": 1
+    },
+    "lowest_malware_score": 0.7358244750815195,
+    "highest_benign_score_below_selected_threshold": 0.6748644565026796,
+    "final_validation_required": true
+  }
 }
