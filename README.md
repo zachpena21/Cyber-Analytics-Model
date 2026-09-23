@@ -212,36 +212,95 @@ Upstream reference:
 
 ## Modern-sample adapter
 
-The legacy forest can be augmented with a small linear detector trained on a
-recent, local collection. The trainer deduplicates by SHA-256, reads encrypted
-malware ZIPs only in memory, and makes deterministic 60/20/20
-train/calibration/holdout splits. Model and adapter hyperparameters are chosen
-without consulting the holdout split. The existing forest remains active, so
-the adapter can add detections but cannot suppress a legacy detection.
+The compact legacy forest is augmented with a small linear detector trained on
+recent samples. The adapter uses the existing 250,041 PE features plus the
+legacy model's binary verdict as feature 250,042. The adapter is the final
+decision layer, so it can both recover modern-malware false negatives and
+correct legacy false positives.
 
-On Windows, collect a new benign development corpus containing only files with
-a valid Authenticode or catalog signature:
+At startup, `defender/defender/__main__.py` loads the adapter whenever
+`defender/defender/models/modern_adapter/metadata.json` is present. The
+service verifies that `DF_MODEL_THRESH` matches the base threshold recorded
+during training. The current deployment uses:
+
+- base benign threshold: `0.510001`
+- adapter threshold: `0.4836661988928846`
+- decision policy: `adapter_with_legacy_verdict_feature`
+
+### Development-data collection
+
+On Windows, collect validly signed benign PE files:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\collect_benign.ps1
 ```
 
-The collector also creates `validation-data/benign-modern.zip`. Copy only that
-benign archive into the disposable VM; do not move malware out of the VM. From
-the repository root in the VM, train with one command:
+For later disjoint collections, use `collect_benign_final.ps1` with an
+exclusion directory containing all previously used benign files. The collector
+deduplicates by SHA-256 and writes a ZIP under `validation-data/`, which is
+ignored by Git.
+
+MalwareBazaar samples must remain inside an approved disposable VM. The
+downloader stores each sample as an encrypted archive and supports repeated
+`--exclude-manifest` arguments so development and final-test malware remain
+disjoint. The trainer and evaluator read archive members directly into memory;
+they do not extract live malware to disk.
+
+### Source-aware training
+
+Run training from the repository root in the VM:
 
 ```bash
-./scripts/train_modern_adapter.sh \
+bash scripts/train_modern_adapter.sh \
   validation-data/malwarebazaar-final-20260922 \
-  validation-data/benign-modern.zip
+  validation-data/benign-retrain \
+  http://BASELINE_HOST:8081/ \
+  validation-data/benign-validation.zip
 ```
 
-The command writes the deployment files and an audit report to
-`defender/defender/models/modern_adapter/`. Review `metadata.json`; if its
-untouched `holdout_test.fpr` is above 1%, do not deploy the adapter. A Docker
-build automatically includes the adapter when that directory is present.
+The third argument must point to the frozen legacy service calibrated at
+`0.510001`, not to an already adapted service.
 
-The 99 recent MalwareBazaar files used here become development data after this
-step. They must not be reported as final external-test performance. Download a
-separate later batch, keep it untouched, and use it only after the image and
-thresholds are frozen.
+When an explicit validation-benign corpus is supplied, the trainer uses a
+source-aware split:
+
+- 80% of development malware for adapter fitting
+- 20% of development malware for calibration
+- all older benign development samples for fitting
+- half of the newer benign corpus for calibration
+- half of the newer benign corpus for an untouched within-run benign check
+
+The adapter's regularization and threshold are chosen on the calibration split
+subject to a maximum 1% calibration FPR. The trainer records model parameters,
+sample counts, split strategy, metrics, and SHA-256 split assignments under
+`defender/defender/models/modern_adapter/`.
+
+The newest corpus becomes development data after it influences model or
+threshold selection. A later disjoint collection is still required for honest
+external evaluation.
+
+### Current measured status
+
+The deployed v3 adapter was trained from 99 development malware samples and
+2,831 signed benign samples. Its source-aware development measurements were:
+
+- calibration: 100% TPR on 20 malware and 0.4% FPR on 500 benign files
+- within-run benign check: 0.2% FPR on 500 benign files
+
+A later external evaluation produced:
+
+- 36/36 malware detected: 0% observed false-negative rate
+- 34/1,000 fresh signed benign files flagged: 3.4% false-positive rate
+- zero request errors
+- 75 ms average response time and 528 ms maximum response time
+
+Therefore, the adapter currently meets the observed malware-detection and
+latency targets on these samples, but it does **not** yet meet the course's 1%
+external FPR target. The gap between within-run and later benign results
+indicates benign-distribution shift. Do not report the development FPR as final
+performance or tune repeatedly against the same external batch.
+
+The next model-development step is to capture continuous adapter scores on
+disjoint benign and malware corpora. Those scores will show whether a stricter
+threshold preserves at least 95% TPR or whether the linear adapter needs a
+different feature/model design.
