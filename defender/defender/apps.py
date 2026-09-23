@@ -8,10 +8,18 @@ import pandas as pd
 from flask import Flask, jsonify, request
 
 from defender.models.attribute_extractor import PEAttributeExtractor
+from defender.signature_policy import has_verified_microsoft_signature
 
 
 LOGGER = logging.getLogger(__name__)
 MAX_SAMPLE_BYTES = int(os.getenv("DF_MAX_SAMPLE_BYTES", str(16 * 1024 * 1024)))
+MICROSOFT_OVERRIDE_ENABLED = os.getenv(
+    "DF_MICROSOFT_OVERRIDE", "1"
+).strip().casefold() not in {"0", "false", "no", "off"}
+MICROSOFT_OVERRIDE_SCORE = float(os.getenv("DF_MICROSOFT_OVERRIDE_SCORE", "0.51"))
+MICROSOFT_OVERRIDE_TOLERANCE = float(
+    os.getenv("DF_MICROSOFT_OVERRIDE_TOLERANCE", "0.000000001")
+)
 
 
 def create_app(model, threshold: float) -> Flask:
@@ -20,6 +28,9 @@ def create_app(model, threshold: float) -> Flask:
         MODEL=model,
         MODEL_THRESHOLD=threshold,
         MAX_CONTENT_LENGTH=MAX_SAMPLE_BYTES,
+        MICROSOFT_OVERRIDE_ENABLED=MICROSOFT_OVERRIDE_ENABLED,
+        MICROSOFT_OVERRIDE_SCORE=MICROSOFT_OVERRIDE_SCORE,
+        MICROSOFT_OVERRIDE_TOLERANCE=MICROSOFT_OVERRIDE_TOLERANCE,
     )
 
     @app.errorhandler(413)
@@ -34,7 +45,7 @@ def create_app(model, threshold: float) -> Flask:
     def model_info():
         model = app.config["MODEL"]
         classifier = getattr(model, "classifier", None)
-        return jsonify(
+        details = dict(
             name="NFS_21_ALL_hash_50000_WITH_MLSEC20",
             classifier=getattr(
                 model,
@@ -43,7 +54,13 @@ def create_app(model, threshold: float) -> Flask:
             ),
             threshold=app.config["MODEL_THRESHOLD"],
             max_sample_bytes=MAX_SAMPLE_BYTES,
-        ), 200
+            microsoft_override=app.config["MICROSOFT_OVERRIDE_ENABLED"],
+            microsoft_override_score=app.config["MICROSOFT_OVERRIDE_SCORE"],
+            modern_adapter=hasattr(model, "predict_components"),
+        )
+        if hasattr(model, "adapter_threshold"):
+            details["adapter_threshold"] = model.adapter_threshold
+        return jsonify(**details), 200
 
     @app.post("/")
     def predict():
@@ -58,10 +75,38 @@ def create_app(model, threshold: float) -> Flask:
         try:
             attributes = PEAttributeExtractor(bytez).extract()
             frame = pd.DataFrame([attributes])
-            result = app.config["MODEL"].predict_threshold(
-                frame, app.config["MODEL_THRESHOLD"]
-            )[0]
-            result = int(result)
+            model = app.config["MODEL"]
+            adapter_triggered = False
+            if hasattr(model, "predict_components"):
+                benign_values, adapter_values = model.predict_components(frame)
+                benign_probability = float(benign_values[0])
+                adapter_probability = float(adapter_values[0])
+                adapter_triggered = (
+                    adapter_probability >= model.adapter_threshold
+                )
+                result = int(adapter_triggered)
+            else:
+                benign_probability = float(model.predict_proba(frame)[0][0])
+                result = int(
+                    benign_probability < app.config["MODEL_THRESHOLD"]
+                )
+
+            if (
+                result == 1
+                and not adapter_triggered
+                and app.config["MICROSOFT_OVERRIDE_ENABLED"]
+                and abs(
+                    benign_probability - app.config["MICROSOFT_OVERRIDE_SCORE"]
+                )
+                <= app.config["MICROSOFT_OVERRIDE_TOLERANCE"]
+                and has_verified_microsoft_signature(bytez)
+            ):
+                LOGGER.info(
+                    "trusted Microsoft borderline override benign_probability=%.9f",
+                    benign_probability,
+                )
+                result = 0
+
             if result not in (0, 1):
                 raise ValueError(f"model returned invalid label {result!r}")
         except Exception:

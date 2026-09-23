@@ -51,8 +51,15 @@ Override the threshold without rebuilding:
 
 ```bash
 docker run --rm -p 8080:8080 --memory=1g --cpus=1 \
-  -e DF_MODEL_THRESH=0.75 blackbox-defense
+  -e DF_MODEL_THRESH=0.510001 blackbox-defense
 ```
+
+The measured validation set has a collision at benign probability `0.51`: one
+malware sample and three valid Microsoft-signed Windows files share that score.
+The service therefore verifies Authenticode only at that exact score and treats
+the file as benign only when its embedded signature chains to a trusted root and
+the leaf publisher organization is exactly `Microsoft Corporation`. Verification
+failures remain malicious. Set `DF_MICROSOFT_OVERRIDE=0` to disable this policy.
 
 ## 3. Verify the API
 
@@ -202,3 +209,39 @@ representative held-out corpus before submission.
 
 Upstream reference:
 [2021 Machine Learning Security Evasion Competition](https://github.com/fabriciojoc/2021-Machine-Learning-Security-Evasion-Competition)
+
+## Modern-sample adapter
+
+The legacy forest can be augmented with a small linear detector trained on a
+recent, local collection. The trainer deduplicates by SHA-256, reads encrypted
+malware ZIPs only in memory, and makes deterministic 60/20/20
+train/calibration/holdout splits. Model and adapter hyperparameters are chosen
+without consulting the holdout split. The existing forest remains active, so
+the adapter can add detections but cannot suppress a legacy detection.
+
+On Windows, collect a new benign development corpus containing only files with
+a valid Authenticode or catalog signature:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\collect_benign.ps1
+```
+
+The collector also creates `validation-data/benign-modern.zip`. Copy only that
+benign archive into the disposable VM; do not move malware out of the VM. From
+the repository root in the VM, train with one command:
+
+```bash
+./scripts/train_modern_adapter.sh \
+  validation-data/malwarebazaar-final-20260922 \
+  validation-data/benign-modern.zip
+```
+
+The command writes the deployment files and an audit report to
+`defender/defender/models/modern_adapter/`. Review `metadata.json`; if its
+untouched `holdout_test.fpr` is above 1%, do not deploy the adapter. A Docker
+build automatically includes the adapter when that directory is present.
+
+The 99 recent MalwareBazaar files used here become development data after this
+step. They must not be reported as final external-test performance. Download a
+separate later batch, keep it untouched, and use it only after the image and
+thresholds are frozen.

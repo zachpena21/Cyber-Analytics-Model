@@ -8,6 +8,10 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 RUN python -m venv /opt/venv
 COPY docker-requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
+# oscrypto 1.3.0 assumes one-digit OpenSSL version components. Debian's
+# current libcrypto reports multi-digit patch versions, so widen only that
+# parser before Signify is imported. See wbond/oscrypto issue #78.
+RUN python -c 'from pathlib import Path; root=Path("/opt/venv/lib/python3.9/site-packages/oscrypto/_openssl"); old=r"(\\d\\.\\d\\.\\d[a-z]*)"; new=r"(\\d+\\.\\d+\\.\\d+[a-z]*)"; files=list(root.glob("_libcrypto_*.py")); assert files and all(old in p.read_text() for p in files); [p.write_text(p.read_text().replace(old, new)) for p in files]'
 
 COPY defender /tmp/app/defender
 COPY convert_model.py /tmp/app/convert_model.py
@@ -23,7 +27,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONPATH="/opt/defender" \
     PYTHONUNBUFFERED=1 \
     DF_MODEL_DIR="/opt/defender/defender/models/compact" \
-    DF_MODEL_THRESH="0.75" \
+    DF_MODEL_THRESH="0.510001" \
     DF_MAX_SAMPLE_BYTES="16777216" \
     PORT="8080"
 

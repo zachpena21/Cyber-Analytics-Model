@@ -14,6 +14,11 @@ class PEAttributeExtractor():
     def __init__(self, bytez):
         # save bytes
         self.bytez = bytez
+        # These must be instance values. Class-level fallbacks otherwise leak
+        # imports/exports from the preceding sample when a PE has none.
+        self.libraries = ""
+        self.functions = ""
+        self.exports = ""
         # save pe
         # self.pe = pefile.PE(data=bytez, fast_load=True)
         # parse using lief

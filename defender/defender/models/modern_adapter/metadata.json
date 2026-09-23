@@ -1,0 +1,49 @@
+{
+  "adapter_threshold": 0.4836661988928846,
+  "alpha": 0.001,
+  "base_benign_threshold": 0.510001,
+  "base_feature_count": 250041,
+  "base_source": "http://192.168.1.193:8081/",
+  "calibration": {
+    "benign": 500,
+    "count": 520,
+    "fnr": 0.0,
+    "fpr": 0.004,
+    "malicious": 20,
+    "tpr": 1.0
+  },
+  "decision_policy": "adapter_with_legacy_verdict_feature",
+  "feature_count": 250042,
+  "format_version": 1,
+  "holdout_test": {
+    "benign": 500,
+    "count": 500,
+    "fnr": null,
+    "fpr": 0.002,
+    "malicious": 0,
+    "tpr": null
+  },
+  "legacy_holdout_test": {
+    "benign": 500,
+    "count": 500,
+    "fnr": null,
+    "fpr": 0.026,
+    "malicious": 0,
+    "tpr": null
+  },
+  "max_calibration_fpr": 0.01,
+  "sample_counts": {
+    "benign": 2831,
+    "benign_training": 1831,
+    "benign_validation": 1000,
+    "malicious": 99,
+    "parser_skipped": 0
+  },
+  "seed": 704,
+  "split_counts": {
+    "calibration": 520,
+    "test": 500,
+    "train": 1910
+  },
+  "split_strategy": "source_aware_newest_benign_held_out"
+}
