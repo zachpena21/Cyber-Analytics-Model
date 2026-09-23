@@ -300,7 +300,37 @@ external FPR target. The gap between within-run and later benign results
 indicates benign-distribution shift. Do not report the development FPR as final
 performance or tune repeatedly against the same external batch.
 
-The next model-development step is to capture continuous adapter scores on
-disjoint benign and malware corpora. Those scores will show whether a stricter
-threshold preserves at least 95% TPR or whether the linear adapter needs a
-different feature/model design.
+### Analyze scores before changing the model
+
+Capture continuous adapter probabilities for the 36 held-out malware samples
+and the 1,000-file benign batch before changing the threshold or retraining.
+Run this from the repository root in the VM while the frozen legacy service is
+available on port 8081:
+
+```bash
+git pull origin main
+./.venv/bin/python scripts/analyze_adapter_scores.py \
+  --malicious validation-data/malwarebazaar-unseen-v1 \
+  --benign validation-data/benign-final-3.zip \
+  --base-url http://192.168.1.193:8081/ \
+  --output-prefix validation-data/adapter-score-analysis-v3
+```
+
+If the actual malware directory has a different name, substitute that path.
+The command reads encrypted malware archives in memory and does not extract
+them. It creates:
+
+- `adapter-score-analysis-v3.csv`: SHA-256, label, legacy verdict, adapter
+  probability, and current verdict for every usable sample
+- `adapter-score-analysis-v3.json`: current rates, class score quantiles, and
+  two diagnostic threshold choices
+
+The first diagnostic maximizes TPR while keeping observed FPR at or below 1%.
+The second finds the strictest cutoff that still keeps observed TPR at or above
+95%. If no cutoff meets both constraints, threshold tuning alone is
+insufficient and the adapter needs a feature or classifier change.
+
+These diagnostic thresholds are selected using the audit batch, so applying
+one makes this batch development data. Do not report its resulting rates as a
+final unbiased measurement. After choosing an adjustment, collect new,
+disjoint benign and malware samples and freeze the model before the final test.
