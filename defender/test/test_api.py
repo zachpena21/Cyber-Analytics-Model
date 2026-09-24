@@ -170,6 +170,59 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(model.base_trigger)
         signature_check.assert_called_once_with(b"MZunsigned")
 
+    def test_score_endpoint_is_disabled_by_default(self):
+        response = self.client.post(
+            "/diagnostics/score",
+            data=b"MZsample",
+            content_type="application/octet-stream",
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.get_json(), {"error": "not found"})
+
+    @patch("defender.apps.has_verified_microsoft_signature", return_value=True)
+    @patch("defender.apps.PEAttributeExtractor", FakeExtractor)
+    def test_score_endpoint_returns_exact_adapter_components(
+        self, signature_check
+    ):
+        model = FakePolicyAwareAdaptedModel()
+        app = create_app(model, 0.510001)
+        app.config["SCORE_ENDPOINT_ENABLED"] = True
+        response = app.test_client().post(
+            "/diagnostics/score",
+            data=b"MZsigned",
+            content_type="application/octet-stream",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json(),
+            {
+                "result": 0,
+                "benign_probability": 0.51,
+                "adapter_probability": 0.1,
+                "adapter_threshold": 0.8,
+                "base_trigger_raw": 1,
+                "base_trigger_adjusted": 0,
+                "signature_checked": True,
+                "signature_verified": True,
+            },
+        )
+        signature_check.assert_called_once_with(b"MZsigned")
+
+    @patch("defender.apps.PEAttributeExtractor", side_effect=ValueError("bad PE"))
+    def test_score_endpoint_reports_fail_closed_error(self, _extractor):
+        app = create_app(FakeModel(), 0.75)
+        app.config["SCORE_ENDPOINT_ENABLED"] = True
+        response = app.test_client().post(
+            "/diagnostics/score",
+            data=b"MZbroken",
+            content_type="application/octet-stream",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json(),
+            {"result": 1, "error": "classification_failed"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
