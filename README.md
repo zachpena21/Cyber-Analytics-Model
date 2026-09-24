@@ -295,50 +295,68 @@ offline scoring used the signature-adjusted legacy verdict, while production
 used the raw forest verdict.
 
 The v4 inference path now applies the Microsoft signature policy to the legacy
-verdict feature before adapter scoring, matching training. The adapter remains
-the final decision and a signature cannot directly override an adapter malware
-verdict. The threshold was raised to `0.70`, between the highest non-flagged
-benign score (`0.674864`) and lowest malware score (`0.735824`). On the audit
-batch this projects:
+verdict feature before adapter scoring. The adapter remains the final decision,
+and a signature cannot directly override an adapter malware verdict. The
+threshold was raised to `0.70`. The rebuilt production service measured:
 
 - 36/36 malware detected: 100% observed TPR
-- 5/1,000 benign files flagged: 0.5% observed FPR
-- zero parser-skipped samples
+- 10/1,000 benign files flagged: 1.0% observed FPR
+- zero errors
+- 76 ms average response time and 538 ms maximum response time
+
+The VM-side feature pipeline predicted five false positives at this threshold,
+while the production container produced ten with only four hashes in common.
+Threshold and cascade development must therefore use scores emitted by the
+production runtime rather than scores reconstructed under the VM's newer
+sklearn compatibility layer.
 
 Because the audit batch selected this threshold, it is now development data.
 These figures are not final unbiased performance. Rebuild the service and
 verify the implementation on this batch, then collect new disjoint benign and
 malware samples for the final report.
 
-### Analyze scores before changing the model
+### Capture exact production scores
 
-Capture continuous adapter probabilities for the 36 held-out malware samples
-and the 1,000-file benign batch before changing the threshold or retraining.
-Run this from the repository root in the VM while the frozen legacy service is
-available on port 8081:
+The service has a diagnostic endpoint that is disabled by default. Enable it
+only in the isolated development environment; never expose it in the final
+submission:
+
+```powershell
+docker run --rm --name blackbox-defense-score-audit `
+  -p 8080:8080 `
+  --memory=1g `
+  --cpus=1 `
+  -e DF_MODEL_THRESH=0.510001 `
+  -e DF_ENABLE_SCORE_ENDPOINT=1 `
+  blackbox-defense:v4
+```
+
+Then capture exact Docker probabilities from the repository root in the VM:
 
 ```bash
 git pull origin main
 ./.venv/bin/python scripts/analyze_adapter_scores.py \
   --malicious validation-data/malwarebazaar-unseen-v1 \
   --benign validation-data/benign-final-3.zip \
-  --base-url http://192.168.1.193:8081/ \
-  --output-prefix validation-data/adapter-score-analysis-v3
+  --service-url http://192.168.1.193:8080/ \
+  --output-prefix validation-data/adapter-score-production-v4
 ```
 
 If the actual malware directory has a different name, substitute that path.
 The command reads encrypted malware archives in memory and does not extract
 them. It creates:
 
-- `adapter-score-analysis-v3.csv`: SHA-256, label, legacy verdict, adapter
-  probability, and current verdict for every usable sample
-- `adapter-score-analysis-v3.json`: current rates, class score quantiles, and
-  two diagnostic threshold choices
+- `adapter-score-production-v4.csv`: SHA-256, label, exact legacy and adapter
+  probabilities, raw and adjusted base verdicts, signature status, and verdict
+- `adapter-score-production-v4.json`: current rates, boundary density, class
+  score quantiles, service metadata, and diagnostic threshold choices
 
 The first diagnostic maximizes TPR while keeping observed FPR at or below 1%.
 The second finds the strictest cutoff that still keeps observed TPR at or above
 95%. If no cutoff meets both constraints, threshold tuning alone is
-insufficient and the adapter needs a feature or classifier change.
+insufficient and the adapter needs a feature or classifier change. Boundary
+density must be calculated from this production report before selecting the
+routing band for a second-stage reviewer.
 
 These diagnostic thresholds are selected using the audit batch. The v4
 adjustment therefore makes this batch development data. Do not report its
