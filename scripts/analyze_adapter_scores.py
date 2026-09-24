@@ -3,15 +3,23 @@
 
 import argparse
 import csv
+import hashlib
 import json
 import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import requests
 from scipy import sparse
 
-from train_modern_adapter import collect, load_feature_pipeline, rates, score_base
+from train_modern_adapter import (
+    collect,
+    file_bytes_generator,
+    load_feature_pipeline,
+    rates,
+    score_base,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,6 +81,219 @@ def quantiles(values):
         for point in points
     }
 
+def boundary_density(labels, probabilities, threshold):
+    result = {}
+    for width in (0.05, 0.10, 0.20):
+        selected = np.abs(probabilities - threshold) <= width
+        result[f"plus_or_minus_{width:.2f}"] = {
+            "count": int(selected.sum()),
+            "fraction": float(selected.mean()),
+            "benign": int(((labels == 0) & selected).sum()),
+            "malicious": int(((labels == 1) & selected).sum()),
+        }
+    return result
+
+
+def collect_service_scores(
+    location,
+    label,
+    max_bytes,
+    seen,
+    service_url,
+    timeout,
+    source,
+):
+    records = []
+    skipped = []
+    endpoint = service_url.rstrip("/") + "/diagnostics/score"
+    for name, bytez in file_bytes_generator(
+        str(location), max_bytes, return_filename=True
+    ):
+        digest = hashlib.sha256(bytez).hexdigest()
+        previous = seen.get(digest)
+        if previous is not None:
+            if previous != label:
+                raise ValueError(f"SHA-256 {digest} appears in both classes")
+            continue
+        response = requests.post(
+            endpoint,
+            data=bytez,
+            headers={"Content-Type": "application/octet-stream"},
+            timeout=timeout,
+        )
+        if response.status_code == 404:
+            raise RuntimeError(
+                "production score endpoint is disabled; restart the service "
+                "with DF_ENABLE_SCORE_ENDPOINT=1"
+            )
+        response.raise_for_status()
+        details = response.json()
+        if details.get("error"):
+            skipped.append(
+                {"sha256": digest, "error": details["error"], "name": name}
+            )
+            continue
+        probability = details.get("adapter_probability")
+        if probability is None or not np.isfinite(float(probability)):
+            raise ValueError(
+                f"service returned invalid adapter probability for {digest}"
+            )
+        if details.get("result") not in (0, 1):
+            raise ValueError(f"service returned invalid result for {digest}")
+        seen[digest] = label
+        records.append(
+            {
+                "sha256": digest,
+                "label": label,
+                "source": source,
+                "benign_probability": float(details["benign_probability"]),
+                "adapter_probability": float(probability),
+                "adapter_threshold": float(details["adapter_threshold"]),
+                "base_trigger_raw": int(details["base_trigger_raw"]),
+                "base_trigger_adjusted": int(
+                    details["base_trigger_adjusted"]
+                ),
+                "signature_checked": bool(details["signature_checked"]),
+                "signature_verified": details["signature_verified"],
+                "current_prediction": int(details["result"]),
+            }
+        )
+        if len(records) % 25 == 0:
+            print(
+                f"Scored {source}: {len(records)} samples",
+                flush=True,
+            )
+    return records, skipped
+
+
+def run_service_audit(args):
+    model_response = requests.get(
+        args.service_url.rstrip("/") + "/model",
+        timeout=args.api_timeout,
+    )
+    model_response.raise_for_status()
+    model_info = model_response.json()
+    if not model_info.get("modern_adapter"):
+        raise SystemExit("service does not have the modern adapter enabled")
+    if not model_info.get("score_endpoint_enabled"):
+        raise SystemExit(
+            "production score endpoint is disabled; restart the service "
+            "with DF_ENABLE_SCORE_ENDPOINT=1"
+        )
+    current_threshold = float(model_info["adapter_threshold"])
+
+    seen = {}
+    malware, malware_skipped = collect_service_scores(
+        args.malicious,
+        1,
+        args.max_bytes,
+        seen,
+        args.service_url,
+        args.api_timeout,
+        "malicious_production_score_audit",
+    )
+    benign, benign_skipped = collect_service_scores(
+        args.benign,
+        0,
+        args.max_bytes,
+        seen,
+        args.service_url,
+        args.api_timeout,
+        "benign_production_score_audit",
+    )
+    records = malware + benign
+    if not malware or not benign:
+        raise SystemExit(
+            f"need both classes after scoring; malware={len(malware)} "
+            f"benign={len(benign)}"
+        )
+    thresholds = {record["adapter_threshold"] for record in records}
+    if thresholds != {current_threshold}:
+        raise SystemExit(
+            "service adapter threshold changed during score collection"
+        )
+
+    labels = np.asarray([record["label"] for record in records], dtype=np.int8)
+    probabilities = np.asarray(
+        [record["adapter_probability"] for record in records],
+        dtype=np.float64,
+    )
+    service_predictions = np.asarray(
+        [record["current_prediction"] for record in records],
+        dtype=bool,
+    )
+    threshold_predictions = probabilities >= current_threshold
+    mismatch_count = int(
+        np.count_nonzero(service_predictions != threshold_predictions)
+    )
+    current = rates(labels, service_predictions)
+    rows = threshold_rows(labels, probabilities)
+    best_recall, strictest = choose_diagnostics(
+        rows, args.max_fpr, args.min_tpr
+    )
+
+    csv_path = Path(f"{args.output_prefix}.csv")
+    json_path = Path(f"{args.output_prefix}.json")
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = (
+        "sha256",
+        "label",
+        "source",
+        "benign_probability",
+        "adapter_probability",
+        "adapter_threshold",
+        "base_trigger_raw",
+        "base_trigger_adjusted",
+        "signature_checked",
+        "signature_verified",
+        "current_prediction",
+    )
+    with csv_path.open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(records)
+
+    report = {
+        "warning": (
+            "Thresholds selected on this audit batch are development results. "
+            "Validate a frozen model on new disjoint data."
+        ),
+        "score_source": "production_diagnostic_endpoint",
+        "service_url": args.service_url,
+        "service_model": model_info,
+        "sample_counts": {
+            "malicious": len(malware),
+            "benign": len(benign),
+            "service_skipped": len(malware_skipped) + len(benign_skipped),
+        },
+        "skipped": {
+            "malicious": malware_skipped,
+            "benign": benign_skipped,
+        },
+        "targets": {"max_fpr": args.max_fpr, "min_tpr": args.min_tpr},
+        "current_threshold": current_threshold,
+        "current_rates": current,
+        "service_threshold_prediction_mismatches": mismatch_count,
+        "boundary_density": boundary_density(
+            labels, probabilities, current_threshold
+        ),
+        "diagnostic_candidates": {
+            "best_recall_under_fpr_ceiling": best_recall,
+            "strictest_meeting_both_targets": strictest,
+            "both_targets_feasible_on_audit_batch": strictest is not None,
+        },
+        "score_quantiles": {
+            "malicious": quantiles(probabilities[labels == 1]),
+            "benign": quantiles(probabilities[labels == 0]),
+        },
+    }
+    with json_path.open("w") as stream:
+        json.dump(report, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+    print(json.dumps(report, indent=2, sort_keys=True))
+    print(f"Per-sample production scores written to {csv_path}")
+    print(f"Summary written to {json_path}")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -95,7 +316,17 @@ def main():
         type=Path,
         default=ROOT / "validation-data" / "adapter-score-analysis",
     )
-    parser.add_argument("--base-url", help="frozen legacy API when compact arrays are absent")
+    parser.add_argument(
+        "--base-url",
+        help="frozen legacy API when compact arrays are absent",
+    )
+    parser.add_argument(
+        "--service-url",
+        help=(
+            "adapted production service with its gated diagnostic endpoint "
+            "enabled; bypasses VM-side feature extraction"
+        ),
+    )
     parser.add_argument("--api-timeout", type=float, default=10.0)
     parser.add_argument("--max-bytes", type=int, default=16 * 1024 * 1024)
     parser.add_argument("--max-fpr", type=float, default=0.01)
@@ -106,6 +337,12 @@ def main():
         raise SystemExit("--max-fpr must be between zero and one")
     if not 0.0 <= args.min_tpr <= 1.0:
         raise SystemExit("--min-tpr must be between zero and one")
+    if args.service_url:
+        try:
+            run_service_audit(args)
+        except (requests.RequestException, ValueError, RuntimeError) as error:
+            raise SystemExit(str(error))
+        return
 
     try:
         pipeline, base = load_feature_pipeline(args.model_dir)
@@ -140,7 +377,8 @@ def main():
     records = malware + benign
     if not malware or not benign:
         raise SystemExit(
-            f"need both classes after parsing; malware={len(malware)} benign={len(benign)}"
+            f"need both classes after parsing; malware={len(malware)} "
+            f"benign={len(benign)}"
         )
     print(
         f"Usable unique samples: malware={len(malware)} benign={len(benign)}; "
