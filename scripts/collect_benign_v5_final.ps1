@@ -1,18 +1,14 @@
 param(
     [int]$Count = 1000,
     [string]$Output = "validation-data\benign-final-4",
-    [string[]]$Exclude = @(
-        "validation-data\benign-modern.zip",
-        "validation-data\benign-final.zip",
-        "validation-data\benign-final-2.zip",
-        "validation-data\benign-final-3.zip"
-    )
+    [string[]]$Exclude = @()
 )
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 $destination = Join-Path $repo $Output
 $archive = "$destination.zip"
+$validationDir = Join-Path $repo "validation-data"
 
 if ((Test-Path $destination) -or (Test-Path $archive)) {
     throw "Final output already exists at $destination or $archive; choose a new -Output name."
@@ -27,12 +23,43 @@ function Add-ExcludedHash([string]$Hash) {
     }
 }
 
+# Always discover prior benign ZIPs automatically. Explicit -Exclude values are
+# added to this set rather than replacing discovery, avoiding PowerShell array
+# binding surprises at the command line.
+$excludePaths = New-Object System.Collections.Generic.List[string]
+if (Test-Path -LiteralPath $validationDir) {
+    Get-ChildItem -LiteralPath $validationDir -File -Filter "benign-*.zip" |
+        Sort-Object FullName |
+        ForEach-Object {
+            if ($_.FullName -ne $archive) {
+                $excludePaths.Add($_.FullName)
+            }
+        }
+}
+
 foreach ($relative in $Exclude) {
-    $path = Join-Path $repo $relative
+    if ([string]::IsNullOrWhiteSpace($relative)) { continue }
+    $path = if ([IO.Path]::IsPathRooted($relative)) {
+        $relative
+    } else {
+        Join-Path $repo $relative
+    }
+    if (-not $excludePaths.Contains($path)) {
+        $excludePaths.Add($path)
+    }
+}
+
+if ($excludePaths.Count -eq 0) {
+    throw "No prior benign exclusion corpora were found under $validationDir."
+}
+
+Write-Host "Loading prior benign exclusion corpora:"
+foreach ($path in $excludePaths) {
     if (-not (Test-Path -LiteralPath $path)) {
         throw "Required exclusion corpus not found: $path"
     }
 
+    $before = $seen.Count
     if (Test-Path -LiteralPath $path -PathType Container) {
         Get-ChildItem -LiteralPath $path -Recurse -File | ForEach-Object {
             if ($_.BaseName -match '^[0-9a-fA-F]{64}$') {
@@ -43,41 +70,42 @@ foreach ($relative in $Exclude) {
                 )
             }
         }
-        continue
-    }
-
-    if ([IO.Path]::GetExtension($path).ToLowerInvariant() -ne ".zip") {
-        throw "Exclusion must be a directory or ZIP: $path"
-    }
-    $zip = [IO.Compression.ZipFile]::OpenRead($path)
-    try {
-        foreach ($entry in $zip.Entries) {
-            if ([string]::IsNullOrEmpty($entry.Name)) { continue }
-            $baseName = [IO.Path]::GetFileNameWithoutExtension($entry.Name)
-            if ($baseName -match '^[0-9a-fA-F]{64}$') {
-                Add-ExcludedHash $baseName
-                continue
-            }
-            $stream = $entry.Open()
-            $sha = [Security.Cryptography.SHA256]::Create()
-            try {
-                $bytes = $sha.ComputeHash($stream)
-                Add-ExcludedHash (
-                    ([BitConverter]::ToString($bytes)).Replace("-", "")
-                )
-            } finally {
-                $sha.Dispose()
-                $stream.Dispose()
-            }
+    } else {
+        if ([IO.Path]::GetExtension($path).ToLowerInvariant() -ne ".zip") {
+            throw "Exclusion must be a directory or ZIP: $path"
         }
-    } finally {
-        $zip.Dispose()
+        $zip = [IO.Compression.ZipFile]::OpenRead($path)
+        try {
+            foreach ($entry in $zip.Entries) {
+                if ([string]::IsNullOrEmpty($entry.Name)) { continue }
+                $baseName = [IO.Path]::GetFileNameWithoutExtension($entry.Name)
+                if ($baseName -match '^[0-9a-fA-F]{64}$') {
+                    Add-ExcludedHash $baseName
+                    continue
+                }
+                $stream = $entry.Open()
+                $sha = [Security.Cryptography.SHA256]::Create()
+                try {
+                    $bytes = $sha.ComputeHash($stream)
+                    Add-ExcludedHash (
+                        ([BitConverter]::ToString($bytes)).Replace("-", "")
+                    )
+                } finally {
+                    $sha.Dispose()
+                    $stream.Dispose()
+                }
+            }
+        } finally {
+            $zip.Dispose()
+        }
     }
+    $added = $seen.Count - $before
+    Write-Host "  $path : +$added unique hashes ($($seen.Count) total)"
 }
 
 $excludedCount = $seen.Count
-if ($excludedCount -lt 3000) {
-    throw "Only $excludedCount prior benign hashes were loaded; expected at least 3000."
+if ($excludedCount -lt 4000) {
+    throw "Only $excludedCount prior benign hashes were loaded; expected at least 4000. Verify benign-modern.zip and benign-final through benign-final-4.zip are present in validation-data."
 }
 
 New-Item -ItemType Directory -Path $destination | Out-Null
