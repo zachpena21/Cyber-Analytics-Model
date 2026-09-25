@@ -155,6 +155,9 @@ def collect_service_scores(
                 ),
                 "signature_checked": bool(details["signature_checked"]),
                 "signature_verified": details["signature_verified"],
+                "reviewer_routed": bool(details.get("reviewer_routed", False)),
+                "reviewer_probability": details.get("reviewer_probability"),
+                "reviewer_threshold": details.get("reviewer_threshold"),
                 "current_prediction": int(details["result"]),
             }
         )
@@ -231,6 +234,64 @@ def run_service_audit(args):
     best_recall, strictest = choose_diagnostics(
         rows, args.max_fpr, args.min_tpr
     )
+    reviewer_diagnostics = None
+    if model_info.get("boundary_reviewer"):
+        route_min = float(model_info["reviewer_route_min"])
+        reviewer_threshold = float(model_info["reviewer_threshold"])
+        reviewer_probability = np.asarray(
+            [
+                float(record["reviewer_probability"])
+                if record["reviewer_probability"] is not None
+                else 0.0
+                for record in records
+            ],
+            dtype=np.float64,
+        )
+        routed = np.asarray(
+            [record["reviewer_routed"] for record in records], dtype=bool
+        )
+        expected_routed = probabilities >= route_min
+        if not np.array_equal(routed, expected_routed):
+            raise SystemExit("service reviewer routing does not match route_min")
+        if any(
+            record["reviewer_threshold"] != reviewer_threshold
+            for record in records
+        ):
+            raise SystemExit("service reviewer threshold changed during audit")
+        reviewer_predictions = reviewer_probability >= reviewer_threshold
+        reviewer_mismatches = int(
+            np.count_nonzero(service_predictions != reviewer_predictions)
+        )
+        reviewer_rows = threshold_rows(labels, reviewer_probability)
+        reviewer_best, reviewer_strictest = choose_diagnostics(
+            reviewer_rows, args.max_fpr, args.min_tpr
+        )
+        reviewer_diagnostics = {
+            "route_min": route_min,
+            "current_threshold": reviewer_threshold,
+            "current_rates": rates(labels, reviewer_predictions),
+            "service_prediction_mismatches": reviewer_mismatches,
+            "routed": {
+                "count": int(routed.sum()),
+                "malicious": int(((labels == 1) & routed).sum()),
+                "benign": int(((labels == 0) & routed).sum()),
+            },
+            "diagnostic_candidates": {
+                "best_recall_under_fpr_ceiling": reviewer_best,
+                "strictest_meeting_both_targets": reviewer_strictest,
+                "both_targets_feasible_on_audit_batch": (
+                    reviewer_strictest is not None
+                ),
+            },
+            "routed_score_quantiles": {
+                "malicious": quantiles(
+                    reviewer_probability[(labels == 1) & routed]
+                ),
+                "benign": quantiles(
+                    reviewer_probability[(labels == 0) & routed]
+                ),
+            },
+        }
 
     csv_path = Path(f"{args.output_prefix}.csv")
     json_path = Path(f"{args.output_prefix}.json")
@@ -246,6 +307,9 @@ def run_service_audit(args):
         "base_trigger_adjusted",
         "signature_checked",
         "signature_verified",
+        "reviewer_routed",
+        "reviewer_probability",
+        "reviewer_threshold",
         "current_prediction",
     )
     with csv_path.open("w", newline="") as stream:
@@ -286,6 +350,7 @@ def run_service_audit(args):
             "malicious": quantiles(probabilities[labels == 1]),
             "benign": quantiles(probabilities[labels == 0]),
         },
+        "reviewer_diagnostics": reviewer_diagnostics,
     }
     with json_path.open("w") as stream:
         json.dump(report, stream, indent=2, sort_keys=True)
