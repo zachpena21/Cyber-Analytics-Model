@@ -1,0 +1,114 @@
+{
+  "adapter_calibration_at_0.70": {
+    "benign": 966,
+    "count": 1000,
+    "fn": 1,
+    "fnr": 0.029411764705882353,
+    "fp": 27,
+    "fpr": 0.027950310559006212,
+    "malicious": 34,
+    "tpr": 0.9705882352941176
+  },
+  "calibration": {
+    "benign": 966,
+    "count": 1000,
+    "fn": 0,
+    "fnr": 0.0,
+    "fp": 0,
+    "fpr": 0.0,
+    "malicious": 34,
+    "tpr": 1.0
+  },
+  "calibration_fraction_per_source_class": 0.2,
+  "classifier": "RandomForestClassifier",
+  "feature_count": 53,
+  "format_version": 2,
+  "max_calibration_fpr": 0.01,
+  "max_depth": 3,
+  "min_samples_leaf": 2,
+  "n_estimators": 192,
+  "parser_failures": [],
+  "reviewer_threshold": 0.3263099058569006,
+  "route_min": 0.5,
+  "routed_counts": {
+    "calibration": {
+      "benign": 85,
+      "count": 119,
+      "malicious": 34
+    },
+    "training": {
+      "benign": 353,
+      "count": 486,
+      "malicious": 133
+    }
+  },
+  "seed": 704,
+  "source_reports": {
+    "adapter-score-production-v4": {
+      "duplicates_skipped": 0,
+      "rows": 1036,
+      "unique_added": 1036
+    },
+    "reviewer-benign-final-2-v4": {
+      "duplicates_skipped": 99,
+      "rows": 1099,
+      "unique_added": 1000
+    },
+    "reviewer-core-v4": {
+      "duplicates_skipped": 0,
+      "rows": 1930,
+      "unique_added": 1930
+    },
+    "reviewer-v5-new-batch": {
+      "duplicates_skipped": 0,
+      "rows": 1033,
+      "unique_added": 1033
+    }
+  },
+  "split_counts": {
+    "adapter-score-production-v4:label_0": {
+      "calibration": 200,
+      "train": 800
+    },
+    "adapter-score-production-v4:label_1": {
+      "calibration": 7,
+      "train": 29
+    },
+    "reviewer-benign-final-2-v4:label_0": {
+      "calibration": 200,
+      "train": 800
+    },
+    "reviewer-core-v4:label_0": {
+      "calibration": 366,
+      "train": 1465
+    },
+    "reviewer-core-v4:label_1": {
+      "calibration": 20,
+      "train": 79
+    },
+    "reviewer-v5-new-batch:label_0": {
+      "calibration": 200,
+      "train": 800
+    },
+    "reviewer-v5-new-batch:label_1": {
+      "calibration": 7,
+      "train": 26
+    }
+  },
+  "training": {
+    "benign": 3865,
+    "count": 3999,
+    "fn": 1,
+    "fnr": 0.007462686567164179,
+    "fp": 10,
+    "fpr": 0.00258732212160414,
+    "malicious": 134,
+    "tpr": 0.9925373134328358
+  },
+  "unique_samples": {
+    "benign": 4831,
+    "count": 4999,
+    "malicious": 168
+  },
+  "warning": "Candidate trained after the 2026-09-25 distribution-shift batch. Do not enable by default until evaluated on later disjoint data."
+}
