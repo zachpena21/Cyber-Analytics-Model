@@ -61,10 +61,14 @@ def create_app(model, threshold: float) -> Flask:
             microsoft_override=app.config["MICROSOFT_OVERRIDE_ENABLED"],
             microsoft_override_score=app.config["MICROSOFT_OVERRIDE_SCORE"],
             modern_adapter=hasattr(model, "predict_components"),
+            boundary_reviewer=hasattr(model, "boundary_reviewer"),
             score_endpoint_enabled=app.config["SCORE_ENDPOINT_ENABLED"],
         )
         if hasattr(model, "adapter_threshold"):
             details["adapter_threshold"] = model.adapter_threshold
+        if hasattr(model, "boundary_reviewer"):
+            details["reviewer_route_min"] = model.boundary_reviewer.route_min
+            details["reviewer_threshold"] = model.boundary_reviewer.threshold
         return jsonify(**details), 200
 
     def score_sample(bytez):
@@ -75,6 +79,9 @@ def create_app(model, threshold: float) -> Flask:
         adapter_probability = None
         signature_checked = False
         signature_verified = None
+        reviewer = getattr(model, "boundary_reviewer", None)
+        reviewer_routed = False
+        reviewer_probability = None
 
         if hasattr(model, "extract_base_components") and hasattr(
             model, "score_adapter"
@@ -111,7 +118,24 @@ def create_app(model, threshold: float) -> Flask:
             adapter_triggered = (
                 adapter_probability >= model.adapter_threshold
             )
-            result = int(adapter_triggered)
+            if (
+                reviewer is not None
+                and adapter_probability >= reviewer.route_min
+            ):
+                reviewer_routed = True
+                reviewer_probability = reviewer.score(
+                    attributes,
+                    bytez,
+                    benign_probability=benign_probability,
+                    adapter_probability=adapter_probability,
+                    base_trigger_raw=raw_base_trigger,
+                    base_trigger_adjusted=adjusted_base_trigger,
+                    signature_checked=signature_checked,
+                    signature_verified=signature_verified,
+                )
+                result = int(reviewer_probability >= reviewer.threshold)
+            else:
+                result = int(adapter_triggered)
         elif hasattr(model, "predict_components"):
             benign_values, adapter_values = model.predict_components(frame)
             benign_probability = float(benign_values[0])
@@ -135,6 +159,7 @@ def create_app(model, threshold: float) -> Flask:
         if (
             result == 1
             and not adapter_triggered
+            and not reviewer_routed
             and app.config["MICROSOFT_OVERRIDE_ENABLED"]
             and abs(
                 benign_probability - app.config["MICROSOFT_OVERRIDE_SCORE"]
@@ -156,7 +181,7 @@ def create_app(model, threshold: float) -> Flask:
 
         if result not in (0, 1):
             raise ValueError(f"model returned invalid label {result!r}")
-        return {
+        details = {
             "result": result,
             "benign_probability": benign_probability,
             "adapter_probability": adapter_probability,
@@ -166,6 +191,13 @@ def create_app(model, threshold: float) -> Flask:
             "signature_checked": signature_checked,
             "signature_verified": signature_verified,
         }
+        if reviewer is not None:
+            details.update(
+                reviewer_routed=reviewer_routed,
+                reviewer_probability=reviewer_probability,
+                reviewer_threshold=reviewer.threshold,
+            )
+        return details
 
     def classify_request(include_scores):
         started = time.perf_counter()
