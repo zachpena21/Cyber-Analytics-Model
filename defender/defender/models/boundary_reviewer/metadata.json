@@ -1,0 +1,50 @@
+{
+  "adapter_calibration_at_0.70": {
+    "benign": 1000,
+    "count": 1020,
+    "fn": 1,
+    "fnr": 0.05,
+    "fp": 5,
+    "fpr": 0.005,
+    "malicious": 20,
+    "tpr": 0.95
+  },
+  "calibration": {
+    "benign": 1000,
+    "count": 1020,
+    "fn": 1,
+    "fnr": 0.05,
+    "fp": 0,
+    "fpr": 0.0,
+    "malicious": 20,
+    "tpr": 0.95
+  },
+  "classifier": "RandomForestClassifier",
+  "feature_count": 53,
+  "format_version": 1,
+  "max_calibration_fpr": 0.01,
+  "max_depth": 2,
+  "min_samples_leaf": 6,
+  "n_estimators": 128,
+  "parser_failures": [],
+  "reviewer_threshold": 0.6831506122881276,
+  "route_min": 0.5,
+  "seed": 704,
+  "split_counts": {
+    "calibration": 1020,
+    "calibration_routed": 36,
+    "training": 1910,
+    "training_routed": 114
+  },
+  "training": {
+    "benign": 1831,
+    "count": 1910,
+    "fn": 7,
+    "fnr": 0.08860759493670886,
+    "fp": 0,
+    "fpr": 0.0,
+    "malicious": 79,
+    "tpr": 0.9113924050632911
+  },
+  "warning": "Candidate only. Do not enable until a later disjoint evaluation improves the frozen adapter while preserving at least 95% TPR."
+}
