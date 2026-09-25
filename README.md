@@ -362,3 +362,34 @@ These diagnostic thresholds are selected using the audit batch. The v4
 adjustment therefore makes this batch development data. Do not report its
 resulting rates as final unbiased performance. Collect new, disjoint benign
 and malware samples and freeze the model before the final test.
+
+### Boundary reviewer candidate
+
+A shallow second-stage forest reviews samples whose adapter malware
+probability is at least `0.50`. It uses the two model scores plus 47 compact PE
+structure features and is evaluated by a custom JSON runtime rather than a
+version-dependent sklearn pickle. The candidate contains 128 depth-2 trees and
+uses a reviewer threshold of `0.6831506122881276`.
+
+On the already-inspected 36-malware/1,000-benign development batch, the
+reviewer changed the adapter result from 10 false positives and zero false
+negatives to one false positive and one false negative. This corresponds to
+0.1% observed FPR and 97.22% observed TPR, but it is not an unbiased final
+result.
+
+The reviewer is disabled by default. Enable it only for isolated validation:
+
+```powershell
+docker run --rm --name blackbox-defense-reviewer `
+  -p 8080:8080 `
+  --memory=1g `
+  --cpus=1 `
+  -e DF_MODEL_THRESH=0.510001 `
+  -e DF_ENABLE_BOUNDARY_REVIEWER=1 `
+  blackbox-defense:v5-reviewer
+```
+
+Without `DF_ENABLE_BOUNDARY_REVIEWER=1`, the service retains the frozen v4
+adapter behavior. Confirm production-container parity on the development batch,
+then freeze the cascade and use later disjoint malware and benign collections
+for the final efficacy report.
