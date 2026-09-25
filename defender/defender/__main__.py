@@ -7,6 +7,7 @@ from pathlib import Path
 from gevent.pywsgi import WSGIServer
 
 from defender.apps import create_app
+from defender.models.boundary_reviewer import BoundaryReviewer
 from defender.models.compact_model import CompactNeedForSpeedModel
 from defender.models.modern_adapter import ModernAdapterModel
 
@@ -31,6 +32,15 @@ def main() -> None:
             Path(__file__).parent / "models" / "modern_adapter",
         )
     ).resolve()
+    reviewer_dir = Path(
+        os.getenv(
+            "DF_REVIEWER_DIR",
+            Path(__file__).parent / "models" / "boundary_reviewer",
+        )
+    ).resolve()
+    reviewer_enabled = os.getenv(
+        "DF_ENABLE_BOUNDARY_REVIEWER", "0"
+    ).strip().casefold() in {"1", "true", "yes", "on"}
     threshold = float(os.getenv("DF_MODEL_THRESH", "0.510001"))
     port = int(os.getenv("PORT", "8080"))
 
@@ -56,6 +66,21 @@ def main() -> None:
                 "DF_MODEL_THRESH does not match the threshold used to "
                 f"calibrate the adapter ({trained_threshold})"
             )
+        reviewer_path = reviewer_dir / "model.json"
+        if reviewer_enabled:
+            if not reviewer_path.is_file():
+                raise FileNotFoundError(
+                    f"Boundary reviewer not found at {reviewer_path}"
+                )
+            model.boundary_reviewer = BoundaryReviewer(reviewer_path)
+            LOGGER.info(
+                "Loaded boundary reviewer from %s (route >= %.6f, threshold %.6f)",
+                reviewer_path,
+                model.boundary_reviewer.route_min,
+                model.boundary_reviewer.threshold,
+            )
+        else:
+            LOGGER.info("Boundary reviewer disabled")
     else:
         LOGGER.info("Loading compact model from %s (no modern adapter)", model_dir)
         model = CompactNeedForSpeedModel(model_dir)
