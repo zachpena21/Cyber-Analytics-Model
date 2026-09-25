@@ -53,6 +53,19 @@ class FakePolicyAwareAdaptedModel:
         return np.array([0.9 if self.base_trigger else 0.1])
 
 
+class FakeReviewer:
+    route_min = 0.5
+    threshold = 0.6
+
+    def __init__(self, probability):
+        self.probability = probability
+        self.calls = 0
+
+    def score(self, _attributes, _bytez, **_components):
+        self.calls += 1
+        return self.probability
+
+
 class ApiTests(unittest.TestCase):
     def setUp(self):
         self.app = create_app(FakeModel(), 0.75)
@@ -170,6 +183,52 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(model.base_trigger)
         signature_check.assert_called_once_with(b"MZunsigned")
 
+    @patch("defender.apps.PEAttributeExtractor", FakeExtractor)
+    def test_reviewer_can_suppress_adapter_false_positive(self):
+        model = FakePolicyAwareAdaptedModel(benign_probability=0.25)
+        model.boundary_reviewer = FakeReviewer(0.2)
+        app = create_app(model, 0.510001)
+        response = app.test_client().post(
+            "/", data=b"MZreview", content_type="application/octet-stream"
+        )
+        self.assertEqual(response.get_json(), {"result": 0})
+        self.assertEqual(model.boundary_reviewer.calls, 1)
+
+    @patch("defender.apps.PEAttributeExtractor", FakeExtractor)
+    def test_reviewer_can_promote_adapter_boundary_sample(self):
+        model = FakePolicyAwareAdaptedModel(benign_probability=0.9)
+        model.boundary_reviewer = FakeReviewer(0.9)
+        model.score_adapter = lambda _features, _trigger: np.array([0.6])
+        app = create_app(model, 0.510001)
+        response = app.test_client().post(
+            "/", data=b"MZreview", content_type="application/octet-stream"
+        )
+        self.assertEqual(response.get_json(), {"result": 1})
+        self.assertEqual(model.boundary_reviewer.calls, 1)
+
+    @patch("defender.apps.PEAttributeExtractor", FakeExtractor)
+    def test_reviewer_is_skipped_below_route_minimum(self):
+        model = FakePolicyAwareAdaptedModel(benign_probability=0.9)
+        model.boundary_reviewer = FakeReviewer(0.9)
+        model.score_adapter = lambda _features, _trigger: np.array([0.4])
+        app = create_app(model, 0.510001)
+        response = app.test_client().post(
+            "/", data=b"MZreview", content_type="application/octet-stream"
+        )
+        self.assertEqual(response.get_json(), {"result": 0})
+        self.assertEqual(model.boundary_reviewer.calls, 0)
+
+    @patch("defender.apps.PEAttributeExtractor", FakeExtractor)
+    def test_reviewer_failure_fails_closed(self):
+        model = FakePolicyAwareAdaptedModel(benign_probability=0.25)
+        model.boundary_reviewer = FakeReviewer(0.9)
+        model.boundary_reviewer.score = lambda *_args, **_kwargs: 1 / 0
+        app = create_app(model, 0.510001)
+        response = app.test_client().post(
+            "/", data=b"MZreview", content_type="application/octet-stream"
+        )
+        self.assertEqual(response.get_json(), {"result": 1})
+
     def test_score_endpoint_is_disabled_by_default(self):
         response = self.client.post(
             "/diagnostics/score",
@@ -222,6 +281,23 @@ class ApiTests(unittest.TestCase):
             response.get_json(),
             {"result": 1, "error": "classification_failed"},
         )
+
+    @patch("defender.apps.PEAttributeExtractor", FakeExtractor)
+    def test_score_endpoint_returns_reviewer_components(self):
+        model = FakePolicyAwareAdaptedModel(benign_probability=0.25)
+        model.boundary_reviewer = FakeReviewer(0.2)
+        app = create_app(model, 0.510001)
+        app.config["SCORE_ENDPOINT_ENABLED"] = True
+        response = app.test_client().post(
+            "/diagnostics/score",
+            data=b"MZreview",
+            content_type="application/octet-stream",
+        )
+        details = response.get_json()
+        self.assertEqual(details["result"], 0)
+        self.assertTrue(details["reviewer_routed"])
+        self.assertEqual(details["reviewer_probability"], 0.2)
+        self.assertEqual(details["reviewer_threshold"], 0.6)
 
 
 if __name__ == "__main__":
