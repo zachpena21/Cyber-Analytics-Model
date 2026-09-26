@@ -21,14 +21,21 @@ class PEAttributeExtractor():
         self.exports = ""
         # save pe
         # self.pe = pefile.PE(data=bytez, fast_load=True)
-        # parse using lief
-        self.lief_binary = lief.PE.parse(list(bytez))
+        # Parse directly from the bytes-like object when supported. Converting
+        # a large sample with list(bytez) creates millions of Python integers
+        # and is prohibitively expensive for near-limit PE files. Keep the
+        # legacy list conversion as a compatibility fallback for older LIEF
+        # bindings that reject bytes input.
+        try:
+            self.lief_binary = lief.PE.parse(bytez)
+        except TypeError:
+            self.lief_binary = lief.PE.parse(list(bytez))
         # attributes
         self.attributes = {}
 
     # extract string metadata
     def extract_string_metadata(self):
-        # occurances of the string 'C:\'.  Not actually extracting the path
+        # occurances of the string 'C:\\'.  Not actually extracting the path
         paths = re.compile(b'c:\\\\', re.IGNORECASE)
         # occurances of http:// or https://.  Not actually extracting the URLs
         urls = re.compile(b'https?://', re.IGNORECASE)
