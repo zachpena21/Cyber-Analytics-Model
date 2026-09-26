@@ -14,6 +14,10 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 RUN python -c 'from pathlib import Path; root=Path("/opt/venv/lib/python3.9/site-packages/oscrypto/_openssl"); old=r"(\\d\\.\\d\\.\\d[a-z]*)"; new=r"(\\d+\\.\\d+\\.\\d+[a-z]*)"; files=list(root.glob("_libcrypto_*.py")); assert files and all(old in p.read_text() for p in files); [p.write_text(p.read_text().replace(old, new)) for p in files]'
 
 COPY defender /tmp/app/defender
+# The v4 reviewer model is stored as compressed/base64 chunks so it can be
+# versioned through the repository connector. Reconstruct and validate the
+# exact JSON artifact during the image build.
+RUN python -c 'from pathlib import Path; import base64,gzip,json; p=Path("/tmp/app/defender/models/boundary_reviewer_v4_candidate"); parts=sorted(p.glob("model.json.pygzip.b64.part-*")); assert len(parts)==5, "expected 5 reviewer v4 payload parts"; raw=gzip.decompress(base64.b64decode("".join(x.read_text() for x in parts))); obj=json.loads(raw); assert len(obj["estimators"])==192, "unexpected reviewer v4 tree count"; (p/"model.json").write_bytes(raw)'
 COPY convert_model.py /tmp/app/convert_model.py
 RUN python /tmp/app/convert_model.py \
       --input /tmp/app/defender/models/NFS_21_ALL_hash_50000_WITH_MLSEC20.pkl.gz \
