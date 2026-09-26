@@ -1,7 +1,5 @@
 """Version-independent runtime for the exported boundary-reviewer forest."""
 
-import base64
-import gzip
 import json
 import math
 from pathlib import Path
@@ -54,25 +52,8 @@ class BoundaryReviewer:
 
     def __init__(self, model_path):
         model_path = Path(model_path)
-        if model_path.is_file():
-            with model_path.open(encoding="utf-8") as stream:
-                payload = json.load(stream)
-        else:
-            # Large reviewer exports can be stored as a gzip-compressed,
-            # base64-encoded sequence of text chunks. This keeps the repository
-            # transport text-only while reconstructing the exact JSON payload at
-            # startup. Normal model.json files remain the preferred/default path.
-            parts = sorted(
-                model_path.parent.glob(model_path.name + ".gz.b64.part-*")
-            )
-            if not parts:
-                raise FileNotFoundError(model_path)
-            encoded = "".join(
-                part.read_text(encoding="ascii").strip() for part in parts
-            )
-            payload = json.loads(
-                gzip.decompress(base64.b64decode(encoded)).decode("utf-8")
-            )
+        with model_path.open(encoding="utf-8") as stream:
+            payload = json.load(stream)
         self._load(payload)
 
     def _load(self, payload):
