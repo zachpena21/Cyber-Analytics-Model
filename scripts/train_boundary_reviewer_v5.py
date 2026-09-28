@@ -196,8 +196,20 @@ def main():
                 threshold, result = choose_threshold(
                     calibration_rows, probabilities, args.max_fpr
                 )
+
+                # All candidates considered here already satisfy max_fpr because
+                # choose_threshold enforces the ceiling. Prefer calibration TPR
+                # first, then preserve malware routing coverage. This prevents a
+                # high route gate from winning merely because it avoids reviewing
+                # difficult low-adapter malware. Among equal-coverage candidates,
+                # prefer lower FPR, then the highest/smallest-scope route gate.
+                routed_malware = (
+                    train_counts["malicious"]
+                    + calibration_counts["malicious"]
+                )
                 rank = (
                     result["tpr"],
+                    routed_malware,
                     -result["fpr"],
                     route_min,
                     -max_depth,
@@ -304,6 +316,10 @@ def main():
         ),
         "format_version": 3,
         "seed": args.seed,
+        "selection_policy": (
+            "maximize calibration TPR under max FPR, then malware routing "
+            "coverage, then lower calibration FPR, then higher route gate"
+        ),
         "route_min": route_min,
         "route_candidates": route_candidates,
         "reviewer_threshold": threshold,
