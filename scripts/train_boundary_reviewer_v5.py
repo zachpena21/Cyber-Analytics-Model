@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Train reviewer v5 while jointly selecting the adapter routing gate.
 
-This keeps the legacy model and modern adapter frozen.  The routing threshold,
+This keeps the legacy model and modern adapter frozen. The routing threshold,
 reviewer forest hyperparameters, and reviewer decision threshold are selected on
 source-stratified calibration data subject to the global FPR ceiling.
 """
@@ -9,6 +9,7 @@ source-stratified calibration data subject to the global FPR ceiling.
 import argparse
 import json
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -30,7 +31,6 @@ from train_boundary_reviewer import (  # noqa: E402
 from train_boundary_reviewer_v2 import (  # noqa: E402
     class_counts,
     merge_reports,
-    source_stratified_split,
 )
 
 
@@ -39,6 +39,58 @@ def parse_route_candidates(values):
     if not candidates or any(value < 0.0 or value > 1.0 for value in candidates):
         raise ValueError("route candidates must be between zero and one")
     return candidates
+
+
+def source_stratified_split_allow_small(records, seed, calibration_fraction):
+    """Source/class split that preserves tiny late-generation groups.
+
+    The older splitter rejects groups smaller than five. That is useful for
+    large corpora, but late MalwareBazaar generations can legitimately contain
+    only a few fresh disjoint samples. For groups with 2-4 rows we reserve one
+    calibration row and keep the rest for training. A singleton stays in
+    training so it is not discarded from the development set.
+    """
+    grouped = defaultdict(list)
+    for row in records:
+        grouped[(row["source"], row["label"])].append(row)
+
+    train = []
+    calibration = []
+    split_counts = {}
+    for group_index, key in enumerate(sorted(grouped)):
+        rows = sorted(grouped[key], key=lambda row: row["sha256"])
+        rng = np.random.RandomState(seed + group_index)
+        order = np.arange(len(rows))
+        rng.shuffle(order)
+
+        if len(rows) == 1:
+            calibration_count = 0
+        elif len(rows) < 5:
+            calibration_count = 1
+        else:
+            calibration_count = max(
+                1, int(round(len(rows) * calibration_fraction))
+            )
+            calibration_count = min(calibration_count, len(rows) - 1)
+
+        calibration_indices = set(order[:calibration_count].tolist())
+        group_train = [
+            row for i, row in enumerate(rows) if i not in calibration_indices
+        ]
+        group_calibration = [
+            row for i, row in enumerate(rows) if i in calibration_indices
+        ]
+        train.extend(group_train)
+        calibration.extend(group_calibration)
+        split_counts[f"{key[0]}:label_{key[1]}"] = {
+            "train": len(group_train),
+            "calibration": len(group_calibration),
+        }
+
+    rng = np.random.RandomState(seed)
+    rng.shuffle(train)
+    rng.shuffle(calibration)
+    return train, calibration, split_counts
 
 
 def main():
@@ -69,7 +121,8 @@ def main():
     args = parser.parse_args()
 
     route_candidates = parse_route_candidates(
-        args.route_candidate or ["0.20", "0.25", "0.30", "0.35", "0.40", "0.45", "0.50"]
+        args.route_candidate
+        or ["0.20", "0.25", "0.30", "0.35", "0.40", "0.45", "0.50"]
     )
     if not 0.0 <= args.max_fpr <= 1.0:
         raise SystemExit("--max-fpr must be between zero and one")
@@ -80,8 +133,10 @@ def main():
             raise SystemExit(f"required input not found: {path}")
 
     records, source_counts = merge_reports(args.report)
-    train_rows, calibration_rows, split_counts = source_stratified_split(
-        records, args.seed, args.calibration_fraction
+    train_rows, calibration_rows, split_counts = (
+        source_stratified_split_allow_small(
+            records, args.seed, args.calibration_fraction
+        )
     )
 
     # Extract once for every sample that could be routed by any candidate.
