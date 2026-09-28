@@ -1,0 +1,122 @@
+{
+  "adapter_calibration_at_0.70": {
+    "benign": 1566,
+    "count": 1604,
+    "fn": 0,
+    "fnr": 0.0,
+    "fp": 97,
+    "fpr": 0.06194125159642401,
+    "malicious": 38,
+    "tpr": 1.0
+  },
+  "calibration": {
+    "benign": 1566,
+    "count": 1604,
+    "fn": 0,
+    "fnr": 0.0,
+    "fp": 11,
+    "fpr": 0.0070242656449553,
+    "malicious": 38,
+    "tpr": 1.0
+  },
+  "calibration_fraction_per_source_class": 0.2,
+  "classifier": "RandomForestClassifier",
+  "feature_count": 54,
+  "format_version": 3,
+  "max_calibration_fpr": 0.01,
+  "max_depth": 2,
+  "min_samples_leaf": 10,
+  "n_estimators": 192,
+  "parser_failures": [],
+  "reviewer_threshold": 0.4870135287958894,
+  "route_candidate_results": [
+    {
+      "calibration": {"benign": 1566, "count": 1604, "fn": 0, "fnr": 0.0, "fp": 14, "fpr": 0.008939974457215836, "malicious": 38, "tpr": 1.0},
+      "max_depth": 6,
+      "min_samples_leaf": 2,
+      "reviewer_threshold": 0.1902725138182422,
+      "route_min": 0.2,
+      "routed_counts": {"calibration": {"benign": 653, "count": 691, "malicious": 38}, "training": {"benign": 2504, "count": 2655, "malicious": 151}}
+    },
+    {
+      "calibration": {"benign": 1566, "count": 1604, "fn": 0, "fnr": 0.0, "fp": 12, "fpr": 0.007662835249042145, "malicious": 38, "tpr": 1.0},
+      "max_depth": 2,
+      "min_samples_leaf": 10,
+      "reviewer_threshold": 0.4853867996328695,
+      "route_min": 0.25,
+      "routed_counts": {"calibration": {"benign": 620, "count": 658, "malicious": 38}, "training": {"benign": 2374, "count": 2525, "malicious": 151}}
+    },
+    {
+      "calibration": {"benign": 1566, "count": 1604, "fn": 0, "fnr": 0.0, "fp": 11, "fpr": 0.0070242656449553, "malicious": 38, "tpr": 1.0},
+      "max_depth": 2,
+      "min_samples_leaf": 10,
+      "reviewer_threshold": 0.4870135287958894,
+      "route_min": 0.3,
+      "routed_counts": {"calibration": {"benign": 582, "count": 620, "malicious": 38}, "training": {"benign": 2255, "count": 2406, "malicious": 151}}
+    },
+    {
+      "calibration": {"benign": 1566, "count": 1604, "fn": 0, "fnr": 0.0, "fp": 10, "fpr": 0.006385696040868455, "malicious": 38, "tpr": 1.0},
+      "max_depth": 2,
+      "min_samples_leaf": 10,
+      "reviewer_threshold": 0.4819800761541421,
+      "route_min": 0.35,
+      "routed_counts": {"calibration": {"benign": 541, "count": 579, "malicious": 38}, "training": {"benign": 2092, "count": 2242, "malicious": 150}}
+    },
+    {
+      "calibration": {"benign": 1566, "count": 1604, "fn": 0, "fnr": 0.0, "fp": 8, "fpr": 0.005108556832694764, "malicious": 38, "tpr": 1.0},
+      "max_depth": 2,
+      "min_samples_leaf": 10,
+      "reviewer_threshold": 0.5140381499035244,
+      "route_min": 0.4,
+      "routed_counts": {"calibration": {"benign": 484, "count": 522, "malicious": 38}, "training": {"benign": 1863, "count": 2013, "malicious": 150}}
+    },
+    {
+      "calibration": {"benign": 1566, "count": 1604, "fn": 0, "fnr": 0.0, "fp": 9, "fpr": 0.005747126436781609, "malicious": 38, "tpr": 1.0},
+      "max_depth": 2,
+      "min_samples_leaf": 10,
+      "reviewer_threshold": 0.4906220677851602,
+      "route_min": 0.45,
+      "routed_counts": {"calibration": {"benign": 388, "count": 426, "malicious": 38}, "training": {"benign": 1564, "count": 1714, "malicious": 150}}
+    },
+    {
+      "calibration": {"benign": 1566, "count": 1604, "fn": 0, "fnr": 0.0, "fp": 1, "fpr": 0.0006385696040868455, "malicious": 38, "tpr": 1.0},
+      "max_depth": 6,
+      "min_samples_leaf": 2,
+      "reviewer_threshold": 0.2896054110338107,
+      "route_min": 0.5,
+      "routed_counts": {"calibration": {"benign": 301, "count": 339, "malicious": 38}, "training": {"benign": 1261, "count": 1409, "malicious": 148}}
+    }
+  ],
+  "route_candidates": [0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5],
+  "route_min": 0.3,
+  "routed_counts": {"calibration": {"benign": 582, "count": 620, "malicious": 38}, "training": {"benign": 2255, "count": 2406, "malicious": 151}},
+  "seed": 704,
+  "selection_policy": "maximize calibration TPR under max FPR, then malware routing coverage, then lower calibration FPR, then higher route gate",
+  "source_reports": {
+    "adapter-score-production-v4": {"duplicates_skipped": 0, "rows": 1036, "unique_added": 1036},
+    "reviewer-benign-final-2-v4": {"duplicates_skipped": 99, "rows": 1099, "unique_added": 1000},
+    "reviewer-core-v4": {"duplicates_skipped": 0, "rows": 1930, "unique_added": 1930},
+    "reviewer-v2-v6-new-batch": {"duplicates_skipped": 0, "rows": 1011, "unique_added": 1011},
+    "reviewer-v3-v8-new-batch": {"duplicates_skipped": 0, "rows": 1007, "unique_added": 1007},
+    "reviewer-v4-v9-dev": {"duplicates_skipped": 0, "rows": 1003, "unique_added": 1003},
+    "reviewer-v5-new-batch": {"duplicates_skipped": 0, "rows": 1033, "unique_added": 1033}
+  },
+  "split_counts": {
+    "adapter-score-production-v4:label_0": {"calibration": 200, "train": 800},
+    "adapter-score-production-v4:label_1": {"calibration": 7, "train": 29},
+    "reviewer-benign-final-2-v4:label_0": {"calibration": 200, "train": 800},
+    "reviewer-core-v4:label_0": {"calibration": 366, "train": 1465},
+    "reviewer-core-v4:label_1": {"calibration": 20, "train": 79},
+    "reviewer-v2-v6-new-batch:label_0": {"calibration": 200, "train": 800},
+    "reviewer-v2-v6-new-batch:label_1": {"calibration": 2, "train": 9},
+    "reviewer-v3-v8-new-batch:label_0": {"calibration": 200, "train": 800},
+    "reviewer-v3-v8-new-batch:label_1": {"calibration": 1, "train": 6},
+    "reviewer-v4-v9-dev:label_0": {"calibration": 200, "train": 800},
+    "reviewer-v4-v9-dev:label_1": {"calibration": 1, "train": 2},
+    "reviewer-v5-new-batch:label_0": {"calibration": 200, "train": 800},
+    "reviewer-v5-new-batch:label_1": {"calibration": 7, "train": 26}
+  },
+  "training": {"benign": 6265, "count": 6416, "fn": 5, "fnr": 0.033112582781456956, "fp": 30, "fpr": 0.004788507581803671, "malicious": 151, "tpr": 0.9668874172185431},
+  "unique_samples": {"benign": 7831, "count": 8020, "malicious": 189},
+  "warning": "Development candidate with jointly calibrated routing gate. Freeze before evaluation on a later disjoint corpus."
+}
