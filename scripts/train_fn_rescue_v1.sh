@@ -4,16 +4,48 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="${ROOT}/.venv/bin/python"
 OUTPUT="${ROOT}/defender/defender/models/fn_rescue_v1_candidate"
-REVIEWER_MODEL="${ROOT}/defender/defender/models/boundary_reviewer_v5_candidate/model.json"
+REVIEWER_DIR="${ROOT}/defender/defender/models/boundary_reviewer_v5_candidate"
+REVIEWER_MODEL="${REVIEWER_DIR}/model.json"
 
 if [[ ! -x "${PYTHON}" ]]; then
   echo "Virtual-environment Python not found at ${PYTHON}" >&2
   exit 1
 fi
+
+# Reviewer v5 is stored in the repository as deterministic gzip/base64 chunks.
+# Reconstruct the exact frozen model locally when model.json is absent, matching
+# the Docker build path and verifying its known SHA-256 before use.
 if [[ ! -f "${REVIEWER_MODEL}" ]]; then
-  echo "Frozen reviewer-v5 model not found at ${REVIEWER_MODEL}" >&2
-  echo "Restore/reconstruct model.json before running this experiment." >&2
-  exit 1
+  echo "Reconstructing frozen reviewer-v5 model.json from payload parts..." >&2
+  "${PYTHON}" - "${REVIEWER_DIR}" <<'PY'
+import base64
+import gzip
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+p = Path(sys.argv[1])
+parts = sorted(p.glob("model.json.gz.b64.part-*"))
+if len(parts) != 2:
+    raise SystemExit(f"expected 2 reviewer-v5 payload parts, found {len(parts)}")
+raw = gzip.decompress(base64.b64decode("".join(x.read_text() for x in parts)))
+expected = "3decc3b4fd372d1812888ac53686ef1f2f3fc271ffae4d33f06db22710ff8ac3"
+actual = hashlib.sha256(raw).hexdigest()
+if actual != expected:
+    raise SystemExit(f"reviewer-v5 model checksum mismatch: {actual}")
+obj = json.loads(raw)
+if len(obj.get("estimators", [])) != 192:
+    raise SystemExit("unexpected reviewer-v5 tree count")
+if len(obj.get("feature_names", [])) != 54:
+    raise SystemExit("unexpected reviewer-v5 feature count")
+if abs(float(obj.get("route_min")) - 0.3) >= 1e-12:
+    raise SystemExit("unexpected reviewer-v5 route_min")
+if abs(float(obj.get("reviewer_threshold")) - 0.4870135287958894) >= 1e-12:
+    raise SystemExit("unexpected reviewer-v5 threshold")
+(p / "model.json").write_bytes(raw)
+print(f"Reconstructed {p / 'model.json'}")
+PY
 fi
 
 exec "${PYTHON}" "${ROOT}/scripts/train_fn_rescue_v1.py" \
