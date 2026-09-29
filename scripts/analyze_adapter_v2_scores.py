@@ -5,12 +5,17 @@ import argparse
 import csv
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 import requests
 
-from test import file_bytes_generator
+ROOT = Path(__file__).resolve().parents[1]
+DEFENDER_ROOT = ROOT / "defender"
+sys.path.insert(0, str(DEFENDER_ROOT))
+
+from test import file_bytes_generator  # noqa: E402
 
 
 def rates(labels, predictions):
