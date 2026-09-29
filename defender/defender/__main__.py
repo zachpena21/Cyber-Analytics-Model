@@ -10,6 +10,7 @@ from defender.apps import create_app
 from defender.models.boundary_reviewer import BoundaryReviewer
 from defender.models.compact_model import CompactNeedForSpeedModel
 from defender.models.modern_adapter import ModernAdapterModel
+from defender.models.modern_adapter_v2 import ModernAdapterV2
 
 
 logging.basicConfig(
@@ -17,6 +18,10 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 LOGGER = logging.getLogger(__name__)
+
+
+def _enabled(name, default="0"):
+    return os.getenv(name, default).strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def main() -> None:
@@ -32,18 +37,27 @@ def main() -> None:
             Path(__file__).parent / "models" / "modern_adapter",
         )
     ).resolve()
+    adapter_v2_dir = Path(
+        os.getenv(
+            "DF_ADAPTER_V2_DIR",
+            Path(__file__).parent / "models" / "modern_adapter_v2_candidate",
+        )
+    ).resolve()
     reviewer_dir = Path(
         os.getenv(
             "DF_REVIEWER_DIR",
             Path(__file__).parent / "models" / "boundary_reviewer",
         )
     ).resolve()
-    reviewer_enabled = os.getenv(
-        "DF_ENABLE_BOUNDARY_REVIEWER", "0"
-    ).strip().casefold() in {"1", "true", "yes", "on"}
+    adapter_v2_enabled = _enabled("DF_ENABLE_ADAPTER_V2")
+    reviewer_enabled = _enabled("DF_ENABLE_BOUNDARY_REVIEWER")
     threshold = float(os.getenv("DF_MODEL_THRESH", "0.510001"))
     port = int(os.getenv("PORT", "8080"))
 
+    if adapter_v2_enabled and reviewer_enabled:
+        raise ValueError(
+            "DF_ENABLE_ADAPTER_V2 and DF_ENABLE_BOUNDARY_REVIEWER are mutually exclusive"
+        )
     if not 0.0 <= threshold <= 1.0:
         raise ValueError("DF_MODEL_THRESH must be between 0 and 1")
     if not model_dir.is_dir():
@@ -66,8 +80,21 @@ def main() -> None:
                 "DF_MODEL_THRESH does not match the threshold used to "
                 f"calibrate the adapter ({trained_threshold})"
             )
-        reviewer_path = reviewer_dir / "model.json"
-        if reviewer_enabled:
+
+        if adapter_v2_enabled:
+            adapter_v2_path = adapter_v2_dir / "model.json"
+            if not adapter_v2_path.is_file():
+                raise FileNotFoundError(
+                    f"Modern adapter v2 not found at {adapter_v2_path}"
+                )
+            model.modern_adapter_v2 = ModernAdapterV2(adapter_v2_path)
+            LOGGER.info(
+                "Loaded modern adapter v2 from %s (threshold %.6f)",
+                adapter_v2_path,
+                model.modern_adapter_v2.threshold,
+            )
+        elif reviewer_enabled:
+            reviewer_path = reviewer_dir / "model.json"
             if not reviewer_path.is_file():
                 raise FileNotFoundError(
                     f"Boundary reviewer not found at {reviewer_path}"
@@ -80,10 +107,15 @@ def main() -> None:
                 model.boundary_reviewer.threshold,
             )
         else:
-            LOGGER.info("Boundary reviewer disabled")
+            LOGGER.info("Boundary reviewer and adapter v2 disabled")
     else:
+        if adapter_v2_enabled:
+            raise FileNotFoundError(
+                "Modern adapter v2 requires the existing modern adapter v1"
+            )
         LOGGER.info("Loading compact model from %s (no modern adapter)", model_dir)
         model = CompactNeedForSpeedModel(model_dir)
+
     app = create_app(model=model, threshold=threshold)
     LOGGER.info("Listening on 0.0.0.0:%d with threshold %.6f", port, threshold)
     WSGIServer(("0.0.0.0", port), app, log=None).serve_forever()
