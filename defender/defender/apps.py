@@ -61,11 +61,14 @@ def create_app(model, threshold: float) -> Flask:
             microsoft_override=app.config["MICROSOFT_OVERRIDE_ENABLED"],
             microsoft_override_score=app.config["MICROSOFT_OVERRIDE_SCORE"],
             modern_adapter=hasattr(model, "predict_components"),
+            modern_adapter_v2=hasattr(model, "modern_adapter_v2"),
             boundary_reviewer=hasattr(model, "boundary_reviewer"),
             score_endpoint_enabled=app.config["SCORE_ENDPOINT_ENABLED"],
         )
         if hasattr(model, "adapter_threshold"):
             details["adapter_threshold"] = model.adapter_threshold
+        if hasattr(model, "modern_adapter_v2"):
+            details["adapter_v2_threshold"] = model.modern_adapter_v2.threshold
         if hasattr(model, "boundary_reviewer"):
             details["reviewer_route_min"] = model.boundary_reviewer.route_min
             details["reviewer_threshold"] = model.boundary_reviewer.threshold
@@ -77,6 +80,9 @@ def create_app(model, threshold: float) -> Flask:
         model = app.config["MODEL"]
         adapter_triggered = False
         adapter_probability = None
+        adapter_v2 = getattr(model, "modern_adapter_v2", None)
+        adapter_v2_probability = None
+        adapter_v2_used = False
         signature_checked = False
         signature_verified = None
         reviewer = getattr(model, "boundary_reviewer", None)
@@ -118,7 +124,21 @@ def create_app(model, threshold: float) -> Flask:
             adapter_triggered = (
                 adapter_probability >= model.adapter_threshold
             )
-            if (
+
+            if adapter_v2 is not None:
+                adapter_v2_used = True
+                adapter_v2_probability = adapter_v2.score(
+                    attributes,
+                    bytez,
+                    benign_probability=benign_probability,
+                    adapter_probability=adapter_probability,
+                    base_trigger_raw=raw_base_trigger,
+                    base_trigger_adjusted=adjusted_base_trigger,
+                    signature_checked=signature_checked,
+                    signature_verified=signature_verified,
+                )
+                result = int(adapter_v2_probability >= adapter_v2.threshold)
+            elif (
                 reviewer is not None
                 and adapter_probability >= reviewer.route_min
             ):
@@ -159,6 +179,7 @@ def create_app(model, threshold: float) -> Flask:
         if (
             result == 1
             and not adapter_triggered
+            and not adapter_v2_used
             and not reviewer_routed
             and app.config["MICROSOFT_OVERRIDE_ENABLED"]
             and abs(
@@ -186,6 +207,10 @@ def create_app(model, threshold: float) -> Flask:
             "benign_probability": benign_probability,
             "adapter_probability": adapter_probability,
             "adapter_threshold": getattr(model, "adapter_threshold", None),
+            "adapter_v2_probability": adapter_v2_probability,
+            "adapter_v2_threshold": (
+                adapter_v2.threshold if adapter_v2 is not None else None
+            ),
             "base_trigger_raw": int(raw_base_trigger),
             "base_trigger_adjusted": int(adjusted_base_trigger),
             "signature_checked": signature_checked,
