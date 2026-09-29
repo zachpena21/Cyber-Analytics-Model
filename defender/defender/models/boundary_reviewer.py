@@ -1,4 +1,4 @@
-"""Version-independent runtime for the exported boundary-reviewer forest."""
+"""Version-aware runtime for exported boundary-reviewer models."""
 
 import json
 import math
@@ -25,6 +25,18 @@ EXTRA_NUMERIC = (
 )
 TEXT_FIELDS = tuple(NeedForSpeedModel.TEXTUAL_ATTRIBUTES)
 CATEGORICAL_FIELDS = tuple(NeedForSpeedModel.CATEGORICAL_ATTRIBUTES)
+DERIVED_FEATURES = (
+    "code_to_file_ratio",
+    "virtual_to_file_ratio",
+    "imports_per_section",
+    "exports_per_section",
+    "section_density",
+    "has_exports",
+    "large_export_table",
+    "amd64_pe32plus",
+    "amd64_pe32plus_many_sections",
+    "modern_amd64_linker",
+)
 
 
 def _finite_number(value):
@@ -47,8 +59,43 @@ def _byte_entropy(bytez):
     return float(-(probabilities * np.log2(probabilities)).sum())
 
 
+def _safe_ratio(numerator, denominator):
+    numerator = _finite_number(numerator)
+    denominator = _finite_number(denominator)
+    if denominator <= 0.0:
+        return 0.0
+    value = numerator / denominator
+    return value if math.isfinite(value) else 0.0
+
+
+def _derived_values(attributes, byte_size):
+    virtual_size = _finite_number(attributes.get("virtual_size"))
+    sizeof_code = _finite_number(attributes.get("sizeof_code"))
+    imports = _finite_number(attributes.get("imports"))
+    exports = _finite_number(attributes.get("exports"))
+    sections = _finite_number(attributes.get("numberof_sections"))
+    linker_major = _finite_number(attributes.get("major_linker_version"))
+    machine = str(attributes.get("machine", ""))
+    magic = str(attributes.get("magic", ""))
+    amd64 = float(machine == "MACHINE_TYPES.AMD64")
+    pe32plus = float(magic == "PE32_PLUS")
+    amd64_pe32plus = amd64 * pe32plus
+    return (
+        _safe_ratio(sizeof_code, byte_size),
+        _safe_ratio(virtual_size, byte_size),
+        _safe_ratio(imports, sections),
+        _safe_ratio(exports, sections),
+        _safe_ratio(byte_size, sections),
+        float(exports > 0.0),
+        float(exports >= 32.0),
+        amd64_pe32plus,
+        float(amd64_pe32plus == 1.0 and sections >= 6.0),
+        float(amd64 == 1.0 and 12.0 <= linker_major <= 14.0),
+    )
+
+
 class BoundaryReviewer:
-    """Evaluate a shallow exported forest without loading sklearn objects."""
+    """Evaluate exported shallow-forest or gradient-boosted reviewers."""
 
     def __init__(self, model_path):
         model_path = Path(model_path)
@@ -63,33 +110,56 @@ class BoundaryReviewer:
             "reviewer_threshold",
             "feature_names",
             "categories",
-            "estimators",
         }
         missing = required - set(payload)
         if missing:
             raise ValueError(
-                "reviewer model is missing keys: "
-                + ", ".join(sorted(missing))
+                "reviewer model is missing keys: " + ", ".join(sorted(missing))
             )
-        if payload["format_version"] != 1:
-            raise ValueError(
-                f"unsupported reviewer format {payload['format_version']!r}"
-            )
+        self.format_version = int(payload["format_version"])
+        if self.format_version not in {1, 5, 6}:
+            raise ValueError(f"unsupported reviewer format {self.format_version!r}")
+
         self.route_min = float(payload["route_min"])
         self.threshold = float(payload["reviewer_threshold"])
         if not 0.0 <= self.route_min <= 1.0:
             raise ValueError("reviewer route_min must be between zero and one")
         if not 0.0 <= self.threshold <= 1.0:
             raise ValueError("reviewer threshold must be between zero and one")
+
         self.feature_names = tuple(payload["feature_names"])
         self.categories = payload["categories"]
-        self.estimators = tuple(payload["estimators"])
-        if not self.estimators:
-            raise ValueError("reviewer forest has no estimators")
+        self.derived_features = tuple(payload.get("derived_features", ()))
+        if self.format_version in {5, 6} and self.derived_features != DERIVED_FEATURES:
+            raise ValueError("reviewer derived feature order does not match runtime")
+        if self.format_version == 1 and self.derived_features:
+            raise ValueError("legacy reviewer unexpectedly contains derived features")
+
         expected_names = self._expected_feature_names()
         if self.feature_names != expected_names:
             raise ValueError("reviewer feature order does not match runtime")
-        self._validate_estimators()
+
+        self.model_type = payload.get("model_type", "forest")
+        if self.format_version in {1, 5}:
+            if self.model_type != "forest":
+                raise ValueError("forest reviewer payload has wrong model_type")
+            self.estimators = tuple(payload.get("estimators", ()))
+            if not self.estimators:
+                raise ValueError("reviewer forest has no estimators")
+            self._validate_estimators(self.estimators, leaf_name="malware_probability")
+        else:
+            if self.model_type != "gradient_boosting":
+                raise ValueError("format 6 reviewer must be gradient_boosting")
+            self.learning_rate = float(payload["learning_rate"])
+            self.initial_raw_score = float(payload["initial_raw_score"])
+            if not math.isfinite(self.learning_rate) or self.learning_rate <= 0.0:
+                raise ValueError("invalid gradient boosting learning rate")
+            if not math.isfinite(self.initial_raw_score):
+                raise ValueError("invalid gradient boosting initial score")
+            self.estimators = tuple(payload.get("estimators", ()))
+            if not self.estimators:
+                raise ValueError("gradient boosted reviewer has no estimators")
+            self._validate_estimators(self.estimators, leaf_name="raw_value")
 
     def _expected_feature_names(self):
         names = list(SCORE_FEATURES)
@@ -104,22 +174,22 @@ class BoundaryReviewer:
                     f"{field}_character_count",
                 )
             )
+        if self.derived_features:
+            names.extend(self.derived_features)
         for field in CATEGORICAL_FIELDS:
             if field not in self.categories:
                 raise ValueError(f"reviewer categories missing {field}")
-            names.extend(
-                f"{field}={value}" for value in self.categories[field]
-            )
+            names.extend(f"{field}={value}" for value in self.categories[field])
         return tuple(names)
 
-    def _validate_estimators(self):
-        for estimator in self.estimators:
+    def _validate_estimators(self, estimators, leaf_name):
+        for estimator in estimators:
             required = (
                 "children_left",
                 "children_right",
                 "feature",
                 "threshold",
-                "malware_probability",
+                leaf_name,
             )
             if any(name not in estimator for name in required):
                 raise ValueError("reviewer estimator is missing an array")
@@ -130,12 +200,12 @@ class BoundaryReviewer:
                 left = int(estimator["children_left"][node])
                 right = int(estimator["children_right"][node])
                 feature = int(estimator["feature"][node])
-                probability = float(estimator["malware_probability"][node])
                 threshold = float(estimator["threshold"][node])
-                if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
+                leaf_value = float(estimator[leaf_name][node])
+                if not math.isfinite(threshold) or not math.isfinite(leaf_value):
+                    raise ValueError("reviewer contains non-finite tree value")
+                if leaf_name == "malware_probability" and not 0.0 <= leaf_value <= 1.0:
                     raise ValueError("reviewer contains invalid leaf probability")
-                if not math.isfinite(threshold):
-                    raise ValueError("reviewer contains non-finite threshold")
                 if left < 0:
                     if right >= 0:
                         raise ValueError("reviewer leaf has inconsistent children")
@@ -152,10 +222,9 @@ class BoundaryReviewer:
             _finite_number(attributes.get(name))
             for name in NeedForSpeedModel.NUMERICAL_ATTRIBUTES
         )
-        values.extend(
-            _finite_number(attributes.get(name)) for name in EXTRA_NUMERIC
-        )
-        values.extend((float(len(bytez)), _byte_entropy(bytez)))
+        values.extend(_finite_number(attributes.get(name)) for name in EXTRA_NUMERIC)
+        byte_size = float(len(bytez))
+        values.extend((byte_size, _byte_entropy(bytez)))
         for field in TEXT_FIELDS:
             field_tokens = _tokens(attributes.get(field))
             values.extend(
@@ -165,17 +234,17 @@ class BoundaryReviewer:
                     float(len(str(attributes.get(field, "") or ""))),
                 )
             )
+        if self.derived_features:
+            values.extend(_derived_values(attributes, byte_size))
         for field in CATEGORICAL_FIELDS:
             actual = str(attributes.get(field, ""))
-            values.extend(
-                float(actual == value) for value in self.categories[field]
-            )
+            values.extend(float(actual == value) for value in self.categories[field])
         if len(values) != len(self.feature_names):
             raise ValueError("reviewer runtime feature count changed")
         return values
 
     @staticmethod
-    def _tree_probability(estimator, vector):
+    def _tree_leaf(estimator, vector, leaf_name):
         node = 0
         while estimator["children_left"][node] >= 0:
             feature = estimator["feature"][node]
@@ -184,15 +253,26 @@ class BoundaryReviewer:
                 if vector[feature] <= estimator["threshold"][node]
                 else estimator["children_right"][node]
             )
-        return float(estimator["malware_probability"][node])
+        return float(estimator[leaf_name][node])
 
     def score(self, attributes, bytez, **components):
         vector = self._vectorize(attributes, bytez, components)
-        return float(
-            np.mean(
-                [
-                    self._tree_probability(estimator, vector)
-                    for estimator in self.estimators
-                ]
+        if self.model_type == "forest":
+            return float(
+                np.mean(
+                    [
+                        self._tree_leaf(estimator, vector, "malware_probability")
+                        for estimator in self.estimators
+                    ]
+                )
             )
+
+        raw = self.initial_raw_score + self.learning_rate * sum(
+            self._tree_leaf(estimator, vector, "raw_value")
+            for estimator in self.estimators
         )
+        if raw >= 0.0:
+            z = math.exp(-raw)
+            return 1.0 / (1.0 + z)
+        z = math.exp(raw)
+        return z / (1.0 + z)
