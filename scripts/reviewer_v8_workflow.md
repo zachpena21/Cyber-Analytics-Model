@@ -133,3 +133,22 @@ Pull and rerun `audit`. If successful, send
 `validation-data/reviewer-v8-development/error-audit.json` for the error analysis
 before selecting additional features. Regression checks can be run with
 `python3 scripts/test_reviewer_v8_archives.py`.
+
+### Ordinary import compatibility
+
+LIEF 0.11.5 aggregates ordinary imports only. LIEF 1.0.0 appends delayed
+libraries and delayed named functions. The workflow removes the exact delayed
+suffix from newly parsed aggregate text, preserving ordinary ordinal names
+already resolved by LIEF. An unexpected suffix raises an extraction error.
+Production extractor code and stored reports are unchanged.
+
+Old cache samples with more library tokens than ordinary import descriptors
+are selectively reparsed when needed by the current command. Other cached
+samples are reused. Refreshed entries record `legacy_imports_compatible: true`,
+retain `raw_attributes`, and vectorize corrected `attributes`. The flag-text
+normalization still runs afterward. A repeat run reuses the refreshed cache.
+Full report parity, required SHA coverage and original-model reconstruction
+checks remain mandatory.
+
+After pulling, rerun the same `audit` command. If parity passes, share
+`error-audit.json`. If it fails, share the new `parity-diagnostics.json`.
