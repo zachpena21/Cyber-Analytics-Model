@@ -164,10 +164,25 @@ def collect_features(rows, reviewer, model_path, locations, cache_path, max_byte
         zeros = {k: 0.0 for k in SCORE_FEATURES}
         needed = len(wanted)
         failures = []
+        archive_warnings = []
+
+        def record_archive_warning(details):
+            archive_warnings.append(details)
+            # Preserve diagnostics and features even if a later member fails.
+            if len(archive_warnings) <= 5 or len(archive_warnings) % 100 == 0:
+                dump(cache_path.parent / "archive-read-warnings.json",
+                     dict(warnings=archive_warnings))
+                dump(cache_path, dict(provenance=provenance, samples=cached))
+            if len(archive_warnings) <= 5:
+                print(f"Skipping unreadable ZIP entry: {details['archive']} "
+                      f"member={details.get('member')!r}: {details['message']}",
+                      flush=True)
+
         for location in locations:
             if not location.exists():
                 raise ValueError(f"Missing PE location: {location}")
-            for bytez in payloads(location, pyzipper.AESZipFile):
+            for bytez in payloads(location, pyzipper.AESZipFile,
+                                  on_error=record_archive_warning):
                 if len(bytez) > max_bytes:
                     continue
                 sha = hashlib.sha256(bytez).hexdigest()
@@ -189,9 +204,16 @@ def collect_features(rows, reviewer, model_path, locations, cache_path, max_byte
             if not wanted:
                 break
         dump(cache_path, dict(provenance=provenance, samples=cached))
+        if archive_warnings:
+            dump(cache_path.parent / "archive-read-warnings.json",
+                 dict(warnings=archive_warnings))
+            print(f"Logged {len(archive_warnings)} unreadable archive entries; "
+                  "required SHA coverage is still enforced. "
+                  "See archive-read-warnings.json.", flush=True)
         if wanted:
             dump(cache_path.parent / "extraction-failures.json",
-                 dict(missing=sorted(wanted), parser_failures=failures))
+                 dict(missing=sorted(wanted), parser_failures=failures,
+                      archive_read_warnings=archive_warnings))
             raise ValueError(f"Could not find/parse {len(wanted)} required samples. See extraction-failures.json; first SHA: {sorted(wanted)[0]}")
     return cached
 
