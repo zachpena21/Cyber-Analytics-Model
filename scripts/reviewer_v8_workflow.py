@@ -177,6 +177,47 @@ def normalize_cached_flags(cached, feature_names):
     return changed
 
 
+def needs_import_refresh(sample):
+    """Old caches lack delay-import provenance; refresh possible aggregates."""
+    attributes = sample["attributes"]
+    return (not sample.get("legacy_imports_compatible", False)
+            and len(str(attributes.get("libraries", "") or "").split())
+            > float(attributes.get("imports", 0)))
+
+
+def legacy_import_attributes(extractor, attributes):
+    """Match LIEF 0.11.5's ordinary-import-only aggregate text.
+
+    LIEF 1.0 appends delayed imports to libraries/imported_functions. Remove
+    that exact suffix, retaining ordinary ordinal names resolved by LIEF.
+    Do not rebuild function names from raw entries (which loses ordinals).
+    """
+    attributes = dict(attributes)
+    if not needs_import_refresh(dict(attributes=attributes)):
+        return attributes
+    binary = extractor.lief_binary
+    ordinary = [entry.name for entry in binary.imports]
+    delayed = list(binary.delay_imports)
+    delayed_libraries = [entry.name for entry in delayed]
+    aggregate = str(attributes.get("libraries", "") or "")
+    if aggregate != " ".join(ordinary + delayed_libraries):
+        raise ValueError("LIEF library aggregation differs from ordinary + delayed imports")
+    delayed_names = [entry.name for library in delayed for entry in library.entries
+                     if not entry.is_ordinal and entry.name]
+    functions = str(attributes.get("functions", "") or "")
+    suffix = " ".join(delayed_names)
+    if suffix:
+        if functions == suffix:
+            functions = ""
+        elif functions.endswith(" " + suffix):
+            functions = functions[:-(len(suffix) + 1)]
+        else:
+            raise ValueError("LIEF function aggregation lacks expected delayed-import suffix")
+    attributes["libraries"] = " ".join(ordinary)
+    attributes["functions"] = functions
+    return attributes
+
+
 def collect_features(rows, reviewer, model_path, locations, cache_path, max_bytes):
     """Cache structural features, not labels or upstream model scores."""
     extractor_path = ROOT / "defender/defender/models/attribute_extractor.py"
@@ -195,7 +236,12 @@ def collect_features(rows, reviewer, model_path, locations, cache_path, max_byte
             cached = previous["samples"]
         else:
             print("Feature cache specification changed; rebuilding.", flush=True)
-    wanted = {r["sha256"] for r in rows} - set(cached)
+    required = {r["sha256"] for r in rows}
+    refresh = {sha for sha in required & set(cached) if needs_import_refresh(cached[sha])}
+    wanted = (required - set(cached)) | refresh
+    if refresh:
+        print(f"Refreshing {len(refresh)} cached samples for ordinary-import compatibility.",
+              flush=True)
     if wanted:
         import pyzipper
         from defender.models.attribute_extractor import PEAttributeExtractor
@@ -227,10 +273,13 @@ def collect_features(rows, reviewer, model_path, locations, cache_path, max_byte
                 if sha not in wanted:
                     continue
                 try:
-                    attributes = PEAttributeExtractor(bytez).extract()
+                    extractor = PEAttributeExtractor(bytez)
+                    raw_attributes = extractor.extract()
+                    attributes = legacy_import_attributes(extractor, raw_attributes)
                     full_vector = reviewer._vectorize(attributes, bytez, zeros)
                     cached[sha] = dict(structural_vector=full_vector[len(SCORE_FEATURES):],
-                                       attributes=attributes)
+                                       attributes=attributes, raw_attributes=raw_attributes,
+                                       legacy_imports_compatible=True)
                     wanted.remove(sha)
                 except Exception as error:
                     failures.append(dict(sha256=sha, error=type(error).__name__, message=str(error)))
