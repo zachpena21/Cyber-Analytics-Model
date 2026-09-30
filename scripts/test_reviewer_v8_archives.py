@@ -32,6 +32,32 @@ def damaged_zip(bad_name="autofill/profile.txt", bad_data=b"text"):
 
 
 class ArchiveScanTests(unittest.TestCase):
+    def test_flag_compatibility_preserves_raw_attributes_and_other_features(self):
+        source = (ROOT / "scripts/reviewer_v8_workflow.py").read_text(encoding="utf-8")
+        function = next(node for node in ast.parse(source).body
+                        if isinstance(node, ast.FunctionDef)
+                        and node.name == "normalize_cached_flags")
+        scope = dict(SCORE_FEATURES=tuple(range(6)))
+        exec(compile(ast.Module(body=[function], type_ignores=[]),
+                     "<actual flag compatibility>", "exec"), scope)
+        fields = ("characteristics_list", "dll_characteristics_list")
+        names = [str(i) for i in range(6)] + [
+            f"{field}_{suffix}" for field in fields
+            for suffix in ("token_count", "unique_count", "character_count")]
+        names.append("unrelated_feature")
+        raw = dict(characteristics_list="CHARACTERISTICS.EXECUTABLE_IMAGE CHARACTERISTICS.LARGE_ADDRESS_AWARE",
+                   dll_characteristics_list="32 64 256")
+        sample = dict(attributes=raw.copy(), structural_vector=[2., 2., 68., 3., 3., 9., 123.])
+        normalize = scope["normalize_cached_flags"]
+        self.assertTrue(normalize(sample, names))
+        self.assertEqual(sample["structural_vector"],
+                         [2., 2., 36., 3., 3., 38., 123.])
+        self.assertEqual(sample["attributes"], raw)
+        self.assertFalse(normalize(sample, names))
+        sample["attributes"] = dict(characteristics_list="EXECUTABLE_IMAGE LARGE_ADDRESS_AWARE",
+                                    dll_characteristics_list="HIGH_ENTROPY_VA DYNAMIC_BASE NX_COMPAT")
+        self.assertFalse(normalize(sample, names))
+
     def test_strict_scan_rejects_bad_member(self):
         with zipfile.ZipFile(io.BytesIO(damaged_zip())) as archive:
             with self.assertRaisesRegex(RuntimeError, "Bad magic number"):
@@ -70,9 +96,9 @@ class ArchiveScanTests(unittest.TestCase):
         # parser and AES reader; no numpy/sklearn/LIEF imports are needed here.
         source = (ROOT / "scripts/reviewer_v8_workflow.py").read_text(encoding="utf-8")
         parsed = ast.parse(source)
-        function = next(node for node in parsed.body
-                        if isinstance(node, ast.FunctionDef)
-                        and node.name == "collect_features")
+        functions = [node for node in parsed.body
+                     if isinstance(node, ast.FunctionDef)
+                     and node.name in ("collect_features", "normalize_cached_flags")]
         from check_data_overlap import payloads
 
         def dump(path, value):
@@ -84,7 +110,7 @@ class ArchiveScanTests(unittest.TestCase):
                           "signature_checked", "signature_verified")
         scope = dict(ROOT=ROOT, hashlib=hashlib, importlib=importlib, json=json,
                      SCORE_FEATURES=score_features, dump=dump, payloads=payloads)
-        exec(compile(ast.Module(body=[function], type_ignores=[]),
+        exec(compile(ast.Module(body=functions, type_ignores=[]),
                      "<actual v8 collect_features>", "exec"), scope)
 
         reader = types.ModuleType("pyzipper")
