@@ -10,7 +10,12 @@ git pull --ff-only origin main
 The audit reads the five reviewer-v7 score reports for data batches v7 through
 v11. It finds PE payloads under `validation-data`, supports AES/nested ZIPs with
 the existing `pyzipper` dependency, and parses files in memory without executing
-them or extracting them to disk. Every required SHA must be found and parsed.
+them or extracting them to disk. Unreadable ZIP entries are logged to
+`archive-read-warnings.json` and scanning continues through later members,
+including members in nested ZIPs. Every required SHA must still be found and
+parsed; a missing required payload stops the workflow. This tolerance is
+enabled only for the v8 feature scan. The overlap checker remains strict so
+an unreadable archive cannot hide a possible training overlap.
 Report class counts must match the recorded batches (v7: 1000/8; v8: 1000/7;
 v9: 1000/3; v10: 1000/20; v11: 589/13, benign/malware). Original training
 reports must also contain their complete recorded unique row counts.
@@ -92,3 +97,13 @@ The VM needs its existing numpy, scipy, scikit-learn, pandas, LIEF and pyzipper
 dependencies. If extraction is interrupted, the cache is checkpointed every
 100 additional samples and reused on the next run. A changed feature
 specification, extractor/runtime source, LIEF version, or size limit invalidates it.
+
+Archive regression checks (standard library only):
+
+```bash
+./.venv/bin/python scripts/test_reviewer_v8_archives.py
+```
+
+These check strict overlap scanning, recovery past a damaged member, nested ZIP
+path diagnostics, and rejection when a required SHA is unavailable. Existing
+feature checkpoints can be reused after this scanner fix.
