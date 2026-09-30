@@ -107,3 +107,11 @@ Archive regression checks (standard library only):
 These check strict overlap scanning, recovery past a damaged member, nested ZIP
 path diagnostics, and rejection when a required SHA is unavailable. Existing
 feature checkpoints can be reused after this scanner fix.
+
+If the frozen-model score check fails, send
+`validation-data/reviewer-v8-development/parity-diagnostics.json`. This file is
+written before the workflow stops and includes differences by batch, the largest
+sample mismatches and their local PE features, dependency versions, Docker
+requirement pins, report paths, and the frozen model digest. Dependency differences
+are clues, not established causes. The workflow does not replace recorded scores
+or loosen the parity requirement. Existing feature cache entries can be reused.
