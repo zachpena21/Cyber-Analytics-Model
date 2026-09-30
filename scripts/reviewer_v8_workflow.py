@@ -241,8 +241,75 @@ def audit(rows, cached, reviewer, payload, output):
     probabilities = model_probabilities(payload, X)
     checked = [i for i, r in enumerate(rows) if r["reviewer_routed"]]
     error = max((abs(probabilities[i] - rows[i]["reviewer_probability"]) for i in checked), default=0)
-    if error > 1e-8 or any(abs(rows[i]["reviewer_threshold"] - reviewer.threshold) > 1e-12 for i in checked):
-        raise ValueError(f"Frozen v7 model does not reproduce reports (max score error {error:.3g}); check model, extractor, and reports")
+    versions = {}
+    for package in ("lief", "numpy", "scikit-learn", "pandas", "pyzipper"):
+        try:
+            versions[package] = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            versions[package] = None
+    requirements = ROOT / "defender/docker-requirements.txt"
+    docker_pins = {}
+    if requirements.exists():
+        for line in requirements.read_text(encoding="utf-8").splitlines():
+            if "==" in line and not line.lstrip().startswith("#"):
+                name, version = line.strip().split("==", 1)
+                docker_pins[name] = version
+    by_batch_parity = {}
+    for source in sorted({r["source"] for r in rows}):
+        indices = [i for i in checked if rows[i]["source"] == source]
+        differences = [abs(float(probabilities[i]) - rows[i]["reviewer_probability"])
+                       for i in indices]
+        by_batch_parity[source] = dict(
+            rows=sum(r["source"] == source for r in rows),
+            routed_checked=len(indices),
+            score_mismatches=sum(d > 1e-8 for d in differences),
+            max_abs_error=max(differences, default=0.0),
+            median_abs_error=float(np.median(differences)) if differences else None,
+            mean_abs_error=float(np.mean(differences)) if differences else None,
+            threshold_mismatches=sum(abs(rows[i]["reviewer_threshold"] - reviewer.threshold) > 1e-12
+                                     for i in indices),
+            decision_changes=sum(int(probabilities[i] >= reviewer.threshold) != rows[i]["current_prediction"]
+                                 for i in indices),
+            recorded_thresholds=sorted({rows[i]["reviewer_threshold"] for i in indices}),
+        )
+    worst = sorted(checked, key=lambda i: (-abs(float(probabilities[i]) - rows[i]["reviewer_probability"]),
+                                          rows[i]["sha256"]))[:30]
+    examples = [
+        dict(sha256=rows[i]["sha256"], source=rows[i]["source"], label=rows[i]["label"],
+             recorded_score=rows[i]["reviewer_probability"],
+             local_score=float(probabilities[i]),
+             absolute_error=abs(float(probabilities[i]) - rows[i]["reviewer_probability"]),
+             recorded_prediction=rows[i]["current_prediction"],
+             local_prediction=int(probabilities[i] >= reviewer.threshold),
+             components={k: rows[i][k] for k in SCORE_FEATURES},
+             local_features=dict(zip(reviewer.feature_names, map(float, X[i]))),
+             pe_attributes=cached[rows[i]["sha256"]]["attributes"])
+        for i in worst if abs(float(probabilities[i]) - rows[i]["reviewer_probability"]) > 1e-8
+    ]
+    threshold_mismatch = any(abs(rows[i]["reviewer_threshold"] - reviewer.threshold) > 1e-12 for i in checked)
+    diagnostics = dict(
+        passed=bool(error <= 1e-8 and not threshold_mismatch),
+        max_abs_error=float(error), python_version=sys.version.split()[0],
+        local_dependency_versions=versions, docker_dependency_pins=docker_pins,
+        dependency_differences={name: dict(local=versions[name], docker=docker_pins[name])
+                                for name in versions if name in docker_pins and versions[name] != docker_pins[name]},
+        feature_count=len(reviewer.feature_names), feature_names=list(reviewer.feature_names),
+        model_route_min=reviewer.route_min, model_threshold=reviewer.threshold,
+        model_stage_count=len(payload["estimators"]),
+        by_batch=by_batch_parity, largest_mismatches=examples,
+        explanation="Descriptive diagnostics only. A dependency difference suggests a possible cause; it does not establish it. Recorded scores are not replaced and training remains blocked on parity failure.",
+    )
+    inputs_path = output / "inputs.json"
+    if inputs_path.exists():
+        diagnostics["inputs"] = json.loads(inputs_path.read_text(encoding="utf-8"))
+    dump(output / "parity-diagnostics.json", diagnostics)
+    if not diagnostics["passed"]:
+        for source, result in by_batch_parity.items():
+            print(f"Parity {source}: {result['score_mismatches']}/{result['routed_checked']} "
+                  f"score mismatches, max_abs={result['max_abs_error']:.6f}, "
+                  f"decision changes={result['decision_changes']}", flush=True)
+        raise ValueError(f"Frozen v7 model does not reproduce reports (max score error {error:.3g}). "
+                         "Send parity-diagnostics.json; training remains blocked until the mismatch is resolved.")
     # Descriptive distance only: log-transform PE counts, then robust scaling.
     S = np.log1p(np.maximum(X[:, len(SCORE_FEATURES):], 0))
     scale = np.percentile(S, 75, axis=0) - np.percentile(S, 25, axis=0)
@@ -487,10 +554,10 @@ def main():
             paths.update(old_paths)
         cached = collect_features(rows, reviewer, args.v7_model, args.location or [args.reports_dir],
                                   args.output / "feature-cache.json", args.max_bytes)
-        # Always validate the audit against the frozen model before fitting.
-        audit(audit_rows, cached, reviewer, frozen, args.output)
         dump(args.output / "inputs.json", dict(reports=paths, frozen_model=str(args.v7_model),
              frozen_model_sha256=hashlib.sha256(args.v7_model.read_bytes()).hexdigest()))
+        # Always validate the audit against the frozen model before fitting.
+        audit(audit_rows, cached, reviewer, frozen, args.output)
         if args.command == "train":
             train(rows, cached, frozen, args.output, paths)
     except (ValueError, OSError, ImportError, RuntimeError) as error:
