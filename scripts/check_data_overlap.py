@@ -33,32 +33,59 @@ MODEL_PREFIXES = {
 }
 
 
-def archive_payloads(archive, reader):
+def archive_payloads(archive, reader, on_error=None, origin=None):
+    """Strict by default; an opted-in caller may log unreadable members.
+
+    Tolerant callers must independently verify required SHA coverage. The overlap
+    checker never opts in, because ignoring unknown data could conceal overlap.
+    """
+    origin = origin or getattr(archive, "filename", None) or "<in-memory ZIP>"
     for entry in archive.infolist():
         if entry.is_dir():
             continue
         try:
             data = archive.read(entry, pwd=b"infected")
         except Exception as error:
-            raise RuntimeError(
-                f"Cannot read {entry.filename!r} from {archive.filename!r}; "
-                f"ZIP method={entry.compress_type}: {error}"
-            ) from error
+            details = {
+                "archive": str(origin), "member": entry.filename,
+                "compression_method": entry.compress_type,
+                "error": type(error).__name__, "message": str(error),
+            }
+            if on_error is None:
+                raise RuntimeError(
+                    f"Cannot read {entry.filename!r} from {origin!r}; "
+                    f"ZIP method={entry.compress_type}: {error}"
+                ) from error
+            on_error(details)
+            continue
         if data[:2] == b"MZ":
             yield data
         else:
             stream = io.BytesIO(data)
             if zipfile.is_zipfile(stream):
                 stream.seek(0)
-                with reader(stream) as nested:
-                    yield from archive_payloads(nested, reader)
+                nested_origin = f"{origin}!/{entry.filename}"
+                try:
+                    nested = reader(stream)
+                except Exception as error:
+                    if on_error is None:
+                        raise
+                    on_error({
+                        "archive": nested_origin, "member": None,
+                        "error": type(error).__name__, "message": str(error),
+                    })
+                    continue
+                with nested:
+                    yield from archive_payloads(
+                        nested, reader, on_error=on_error, origin=nested_origin
+                    )
 
 
-def payloads(path, reader):
+def payloads(path, reader, on_error=None):
     if path.is_dir():
         for child in sorted(path.rglob("*")):
             if child.is_file():
-                yield from payloads(child, reader)
+                yield from payloads(child, reader, on_error=on_error)
         return
     with path.open("rb") as stream:
         header = stream.read(2)
@@ -66,8 +93,20 @@ def payloads(path, reader):
         yield path.read_bytes()
     elif zipfile.is_zipfile(path):
         # pyzipper 0.3.6 requires a string rather than a pathlib.Path.
-        with reader(str(path)) as archive:
-            yield from archive_payloads(archive, reader)
+        try:
+            archive = reader(str(path))
+        except Exception as error:
+            if on_error is None:
+                raise
+            on_error({
+                "archive": str(path), "member": None,
+                "error": type(error).__name__, "message": str(error),
+            })
+            return
+        with archive:
+            yield from archive_payloads(
+                archive, reader, on_error=on_error, origin=str(path)
+            )
 
 
 def pe_hashes(path, reader):
