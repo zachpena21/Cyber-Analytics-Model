@@ -32,6 +32,34 @@ def damaged_zip(bad_name="autofill/profile.txt", bad_data=b"text"):
 
 
 class ArchiveScanTests(unittest.TestCase):
+    def test_delay_import_removal_preserves_resolved_ordinal_names(self):
+        source = (ROOT / "scripts/reviewer_v8_workflow.py").read_text(encoding="utf-8")
+        functions = [node for node in ast.parse(source).body
+                     if isinstance(node, ast.FunctionDef)
+                     and node.name in ("needs_import_refresh", "legacy_import_attributes")]
+        scope = {}
+        exec(compile(ast.Module(body=functions, type_ignores=[]),
+                     "<actual import compatibility>", "exec"), scope)
+        entry = types.SimpleNamespace
+        binary = entry(imports=[entry(name="KERNEL32.dll"), entry(name="WS2_32.dll")],
+                       delay_imports=[entry(name="USER32.dll", entries=[
+                           entry(name="MessageBoxW", is_ordinal=False),
+                           entry(name="", is_ordinal=True)])])
+        raw = dict(imports=2, libraries="KERNEL32.dll WS2_32.dll USER32.dll",
+                   functions="CreateFileW socket MessageBoxW")
+        extractor = entry(lief_binary=binary)
+        expected = dict(imports=2, libraries="KERNEL32.dll WS2_32.dll",
+                        functions="CreateFileW socket")
+        normalize = scope["legacy_import_attributes"]
+        self.assertEqual(normalize(extractor, raw), expected)
+        self.assertEqual(raw["functions"], "CreateFileW socket MessageBoxW")
+        self.assertEqual(normalize(extractor, expected), expected)
+        self.assertFalse(scope["needs_import_refresh"](
+            dict(attributes=raw, legacy_imports_compatible=True)))
+        damaged = dict(raw, functions="CreateFileW socket SomethingElse")
+        with self.assertRaisesRegex(ValueError, "expected delayed-import suffix"):
+            normalize(extractor, damaged)
+
     def test_flag_compatibility_preserves_raw_attributes_and_other_features(self):
         source = (ROOT / "scripts/reviewer_v8_workflow.py").read_text(encoding="utf-8")
         function = next(node for node in ast.parse(source).body
@@ -98,7 +126,7 @@ class ArchiveScanTests(unittest.TestCase):
         parsed = ast.parse(source)
         functions = [node for node in parsed.body
                      if isinstance(node, ast.FunctionDef)
-                     and node.name in ("collect_features", "normalize_cached_flags")]
+                     and node.name in ("collect_features", "normalize_cached_flags", "needs_import_refresh", "legacy_import_attributes")]
         from check_data_overlap import payloads
 
         def dump(path, value):
@@ -124,9 +152,15 @@ class ArchiveScanTests(unittest.TestCase):
         class Extractor:
             def __init__(self, data):
                 self.data = data
+                self.lief_binary = types.SimpleNamespace(
+                    imports=[types.SimpleNamespace(name="KERNEL32.dll")],
+                    delay_imports=[types.SimpleNamespace(name="USER32.dll", entries=[
+                        types.SimpleNamespace(name="MessageBoxW", is_ordinal=False)])])
 
             def extract(self):
-                return {"size": len(self.data)}
+                return dict(size=len(self.data), imports=1,
+                            libraries="KERNEL32.dll USER32.dll",
+                            functions="CreateFileW MessageBoxW")
 
         extractor_module.PEAttributeExtractor = Extractor
 
@@ -156,6 +190,20 @@ class ArchiveScanTests(unittest.TestCase):
             found = collect([{"sha256": good_sha}], Reviewer(), directory / "unused-model.json",
                             [archive], directory / "good-cache.json", 1024)
             self.assertIn(good_sha, found)
+            self.assertEqual(found[good_sha]["attributes"]["functions"], "CreateFileW")
+            self.assertEqual(found[good_sha]["raw_attributes"]["functions"],
+                             "CreateFileW MessageBoxW")
+            cache_path = directory / "good-cache.json"
+            previous = json.loads(cache_path.read_text())
+            previous["samples"][good_sha]["attributes"] = Extractor(GOOD_PE).extract()
+            previous["samples"][good_sha].pop("legacy_imports_compatible")
+            dump(cache_path, previous)
+            refreshed = collect([{"sha256": good_sha}], Reviewer(), directory / "unused-model.json",
+                                [archive], cache_path, 1024)
+            self.assertEqual(refreshed[good_sha]["attributes"]["libraries"], "KERNEL32.dll")
+            reused = collect([{"sha256": good_sha}], Reviewer(), directory / "unused-model.json",
+                             [directory / "nonexistent"], cache_path, 1024)
+            self.assertEqual(reused, refreshed)
 
 
 if __name__ == "__main__":
