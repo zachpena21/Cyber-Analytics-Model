@@ -139,6 +139,44 @@ def vector(row, cached):
     return [row[k] for k in SCORE_FEATURES] + cached["structural_vector"]
 
 
+def normalize_cached_flags(cached, feature_names):
+    """Restore Docker/LIEF 0.11.5 flag spelling without reparsing PE bytes.
+
+    Later LIEF versions add CHARACTERISTICS. to header flags and may render
+    DLL flags as decimal integers. V7 includes their text lengths as features.
+    Keep raw attributes for provenance; change only the six flag-text features.
+    Flag values: https://lief.re/doc/latest/formats/pe/python.html
+    """
+    dll_names = {
+        32: "HIGH_ENTROPY_VA", 64: "DYNAMIC_BASE", 128: "FORCE_INTEGRITY",
+        256: "NX_COMPAT", 512: "NO_ISOLATION", 1024: "NO_SEH",
+        2048: "NO_BIND", 4096: "APPCONTAINER", 8192: "WDM_DRIVER",
+        16384: "GUARD_CF", 32768: "TERMINAL_SERVER_AWARE",
+    }
+    changed = False
+    attributes = cached["attributes"]
+    for field in ("characteristics_list", "dll_characteristics_list"):
+        if field not in attributes:
+            continue
+        tokens = str(attributes[field] or "").split()
+        if field == "characteristics_list":
+            tokens = [t.removeprefix("HEADER_CHARACTERISTICS.").removeprefix("CHARACTERISTICS.")
+                      for t in tokens]
+        else:
+            tokens = [t.removeprefix("DLL_CHARACTERISTICS.") for t in tokens]
+            tokens = [dll_names.get(int(t), t) if t.isdecimal() else t for t in tokens]
+        text = " ".join(tokens)
+        for suffix, value in (("token_count", len(tokens)),
+                              ("unique_count", len(set(tokens))),
+                              ("character_count", len(text))):
+            name = f"{field}_{suffix}"
+            index = feature_names.index(name) - len(SCORE_FEATURES)
+            if cached["structural_vector"][index] != float(value):
+                cached["structural_vector"][index] = float(value)
+                changed = True
+    return changed
+
+
 def collect_features(rows, reviewer, model_path, locations, cache_path, max_bytes):
     """Cache structural features, not labels or upstream model scores."""
     extractor_path = ROOT / "defender/defender/models/attribute_extractor.py"
@@ -215,6 +253,12 @@ def collect_features(rows, reviewer, model_path, locations, cache_path, max_byte
                  dict(missing=sorted(wanted), parser_failures=failures,
                       archive_read_warnings=archive_warnings))
             raise ValueError(f"Could not find/parse {len(wanted)} required samples. See extraction-failures.json; first SHA: {sorted(wanted)[0]}")
+    normalized = sum(normalize_cached_flags(sample, reviewer.feature_names)
+                     for sample in cached.values())
+    if normalized:
+        dump(cache_path, dict(provenance=provenance, samples=cached))
+        print(f"Restored legacy PE flag text features for {normalized} cached samples; "
+              "raw attributes preserved. Full score parity is still required.", flush=True)
     return cached
 
 
