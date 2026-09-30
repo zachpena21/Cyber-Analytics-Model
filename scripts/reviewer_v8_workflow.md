@@ -115,3 +115,21 @@ sample mismatches and their local PE features, dependency versions, Docker
 requirement pins, report paths, and the frozen model digest. Dependency differences
 are clues, not established causes. The workflow does not replace recorded scores
 or loosen the parity requirement. Existing feature cache entries can be reused.
+
+### LIEF flag text compatibility
+
+The VM may use a newer LIEF than the Docker service (which pins 0.11.5).
+New versions can render DLL flags as decimal numbers and add `CHARACTERISTICS.`
+to header flag names. V7 uses token counts and character lengths of these fields.
+The workflow restores the legacy flag spelling in structural vectors for both
+existing cache entries and newly extracted samples. Raw cached attributes remain
+unchanged. Existing caches are reused; deleting the cache or downgrading Python
+is unnecessary. The normalization reproduced all 30 largest mismatches in the
+uploaded diagnostics to floating-point precision. Full report score parity is
+still required before the audit or training can proceed; other parser differences
+may remain outside those 30 samples.
+
+Pull and rerun `audit`. If successful, send
+`validation-data/reviewer-v8-development/error-audit.json` for the error analysis
+before selecting additional features. Regression checks can be run with
+`python3 scripts/test_reviewer_v8_archives.py`.
