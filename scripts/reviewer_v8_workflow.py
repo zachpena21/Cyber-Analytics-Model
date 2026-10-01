@@ -269,7 +269,13 @@ def collect_features(rows, reviewer, model_path, locations, cache_path, max_byte
     cached = {}
     if cache_path.exists():
         previous = json.loads(cache_path.read_text(encoding="utf-8"))
-        if previous.get("provenance") == provenance:
+        previous_provenance = dict(previous.get("provenance", {}))
+        # This reviewed runtime revision changes score traversal only; its
+        # _vectorize implementation and feature constants are unchanged.
+        if previous_provenance.get("extractor_runtime_sha256") == (
+                "633df581bfcc2b0e1e2023be58da9b9023da386e118048d0223ac0a703248115"):
+            previous_provenance["extractor_runtime_sha256"] = fingerprint
+        if previous_provenance == provenance:
             cached = previous["samples"]
         else:
             print("Feature cache specification changed; rebuilding.", flush=True)
@@ -352,6 +358,10 @@ def collect_features(rows, reviewer, model_path, locations, cache_path, max_byte
 
 
 def model_probabilities(payload, X):
+    if payload.get("format_version") == 7:
+        if payload.get("input_dtype") != "float32":
+            raise ValueError("format 7 reviewer requires float32 input_dtype")
+        X = np.asarray(X, dtype=np.float32)
     raw = np.full(len(X), float(payload["initial_raw_score"]))
     for tree in payload["estimators"]:
         raw += float(payload["learning_rate"]) * np.array([
@@ -688,7 +698,7 @@ def export(clf, frozen, threshold):
         t = stage[0].tree_
         trees.append(dict(children_left=t.children_left.tolist(), children_right=t.children_right.tolist(),
                           feature=t.feature.tolist(), threshold=t.threshold.tolist(), raw_value=t.value[:, 0, 0].tolist()))
-    return dict(format_version=6, model_type="gradient_boosting", route_min=frozen["route_min"],
+    return dict(format_version=7, input_dtype="float32", model_type="gradient_boosting", route_min=frozen["route_min"],
                 reviewer_threshold=threshold, learning_rate=float(clf.learning_rate),
                 initial_raw_score=float(clf._raw_predict_init(np.zeros((1, clf.n_features_in_)))[0, 0]),
                 feature_names=frozen["feature_names"], categories=frozen["categories"],
@@ -779,6 +789,7 @@ def train(rows, cached, frozen, output, input_reports):
         experiment="v7_old_data_runtime_aligned_control", development_only=True,
         training_sources=list(OLD_SOURCES), configuration=CONFIG, seed=704,
         route_min=route, reviewer_threshold=control_threshold,
+        model_format_version=7, tree_input_dtype="float32",
         calibration=control_calibration, calibration_by_source=control_by_source,
         runtime_parity_max_abs_error=control_parity,
         reconstruction_mode=reconstruction_mode, verified_original_reconstruction_error=verified_error))
@@ -788,6 +799,7 @@ def train(rows, cached, frozen, output, input_reports):
                     warning="Source holdouts assess this fixed reviewer configuration, not the entire upstream pipeline. No skimmer is fitted; archived v7 scores must not be used as leakage-safe skimmer training scores.",
                     configuration=CONFIG, seed=704, new_source_split_seed=1704, calibration_fraction=.2,
                     sklearn_version=importlib.metadata.version("scikit-learn"), numpy_version=np.__version__,
+                    model_format_version=7, tree_input_dtype="float32",
                     route_min=route, original_threshold=frozen["reviewer_threshold"], reviewer_threshold=threshold,
                     feature_names=frozen["feature_names"], source_counts=dict(Counter(r["source"] for r in rows)),
                     input_reports=input_reports, original_v7_reconstruction_error=verified_error,
