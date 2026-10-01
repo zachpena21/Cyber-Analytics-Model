@@ -21,7 +21,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "defender"))
 from defender.models.boundary_reviewer import (  # noqa: E402
-    BoundaryReviewer, SCORE_FEATURES, _byte_entropy,
+    BoundaryReviewer, SCORE_FEATURES, TEXT_FIELDS, DERIVED_FEATURES,
+    _byte_entropy, _derived_values,
 )
 from check_data_overlap import payloads  # noqa: E402
 
@@ -550,17 +551,104 @@ def merge_training(directory, audit_rows):
     return list(records.values()), reports
 
 
-def fit(rows, cached, route):
+def raw_training_vector(row, sample, frozen):
+    """Diagnostic-only reconstruction of the original unnormalized extractor view."""
+    values = vector(row, sample)
+    attributes = sample.get("raw_attributes", sample["attributes"])
+    names = frozen["feature_names"]
+    for index, name in enumerate(names[len(SCORE_FEATURES):], len(SCORE_FEATURES)):
+        if name in attributes and isinstance(attributes[name], (int, float)):
+            values[index] = float(attributes[name])
+    for field in TEXT_FIELDS:
+        text = str(attributes.get(field, "") or "")
+        tokens = text.split()
+        for suffix, value in (("token_count", len(tokens)),
+                              ("unique_count", len(set(tokens))),
+                              ("character_count", len(text))):
+            name = f"{field}_{suffix}"
+            if name in names:
+                values[names.index(name)] = float(value)
+    byte_size = values[names.index("byte_size")]
+    for name, value in zip(DERIVED_FEATURES, _derived_values(attributes, byte_size)):
+        if name in names:
+            values[names.index(name)] = float(value)
+    for field, categories in frozen["categories"].items():
+        for category in categories:
+            values[names.index(f"{field}={category}")] = float(str(attributes.get(field, "")) == category)
+    return values
+
+
+def fit(rows, cached, route, raw_spec=None):
     from sklearn.ensemble import GradientBoostingClassifier
     from sklearn.utils.class_weight import compute_sample_weight
     routed = [r for r in rows if r["adapter_probability"] >= route]
     y = np.array([r["label"] for r in routed])
     if set(y) != {0, 1}:
         raise ValueError("Both classes are required in routed training data")
-    X = np.array([vector(r, cached[r["sha256"]]) for r in routed])
+    X = np.array([raw_training_vector(r, cached[r["sha256"]], raw_spec)
+                  if raw_spec is not None else vector(r, cached[r["sha256"]])
+                  for r in routed])
     clf = GradientBoostingClassifier(**CONFIG, random_state=704)
     clf.fit(X, y, sample_weight=compute_sample_weight("balanced", y))
     return clf
+
+
+def reconstruction_diagnostics(rows, cached, frozen, clf, output, input_reports):
+    """Distinguish training representation drift from scoring-runtime parity.
+
+    Alternative fits are diagnostic only and cannot bypass the baseline guard.
+    """
+    routed = [r for r in rows if r["adapter_probability"] >= frozen["route_min"]]
+    X = np.array([vector(r, cached[r["sha256"]]) for r in routed])
+    raw_X = np.array([raw_training_vector(r, cached[r["sha256"]], frozen) for r in routed])
+    variants = {}
+    candidates = [("docker_compatible", clf, X)]
+    if not np.array_equal(X, raw_X):
+        candidates.append(("raw_extractor_diagnostic_only",
+                           fit(rows, cached, frozen["route_min"], raw_spec=frozen), raw_X))
+    for name, candidate, features in candidates:
+        expected = model_probabilities(frozen, features)
+        actual = candidate.predict_proba(features)[:, 1]
+        errors = np.abs(actual - expected)
+        trees = export(candidate, frozen, frozen["reviewer_threshold"])["estimators"]
+        first_difference = None
+        for stage, (observed, reference) in enumerate(zip(trees, frozen["estimators"])):
+            differences = [key for key in reference if observed.get(key) != reference[key]]
+            if differences:
+                first_difference = dict(stage=stage, differing_arrays=differences,
+                                        ref_features=reference["feature"], fit_features=observed["feature"],
+                                        ref_thresholds=reference["threshold"], fit_thresholds=observed["threshold"])
+                break
+        worst = np.argsort(-errors, kind="stable")[:10]
+        variants[name] = dict(max_abs_error=float(errors.max()),
+            mean_abs_error=float(errors.mean()), mismatch_count=int((errors > 1e-8).sum()),
+            passed=bool(errors.max() <= 1e-8),
+            feature_matrix_sha256=hashlib.sha256(features.astype("<f8").tobytes()).hexdigest(),
+            initial_raw_score=float(candidate._raw_predict_init(features[:1])[0, 0]),
+            first_tree_difference=first_difference,
+            largest_mismatches=[dict(sha256=routed[i]["sha256"], source=routed[i]["source"],
+                label=routed[i]["label"], frozen_score=float(expected[i]), refit_score=float(actual[i]),
+                absolute_error=float(errors[i])) for i in worst])
+    versions = {}
+    for dependency in ("lief", "numpy", "scikit-learn", "scipy"):
+        try:
+            versions[dependency] = importlib.metadata.version(dependency)
+        except importlib.metadata.PackageNotFoundError:
+            versions[dependency] = None
+    report_fingerprints = {name: hashlib.sha256(Path(path).read_bytes()).hexdigest()
+                           for name, path in input_reports.items() if Path(path).is_file()}
+    result = dict(scope="Training reconstruction diagnostics; raw-feature fits do not authorize training or deployment.",
+        python_version=sys.version.split()[0], dependency_versions=versions, configuration=CONFIG,
+        seed=704, original_training_count=len(rows), original_routed_training_count=len(routed),
+        source_label_counts=dict(Counter(f"{r['source']}:label_{r['label']}" for r in rows)),
+        raw_attribute_coverage=sum("raw_attributes" in cached[r["sha256"]] for r in routed),
+        ordered_routed_sha256=hashlib.sha256("\n".join(r["sha256"] for r in routed).encode()).hexdigest(),
+        report_sha256=report_fingerprints, frozen_initial_raw_score=frozen["initial_raw_score"],
+        raw_vs_runtime_feature_changes={name: int((X[:, i] != raw_X[:, i]).sum())
+            for i, name in enumerate(frozen["feature_names"]) if np.any(X[:, i] != raw_X[:, i])},
+        variants=variants)
+    dump(output / "reconstruction-diagnostics.json", result)
+    return result
 
 
 def predict(clf, rows, cached, route):
@@ -617,7 +705,12 @@ def train(rows, cached, frozen, output, input_reports):
     Xold = np.array([vector(r, cached[r["sha256"]]) for r in original_fit])
     reconstruction_error = float(np.max(np.abs(old_clf.predict_proba(Xold)[:, 1] - model_probabilities(frozen, Xold))))
     if reconstruction_error > 1e-8:
-        raise ValueError(f"Original v7 fit cannot be reconstructed (max error {reconstruction_error:.3g}); check original reports/model/dependencies before training")
+        diagnostic = reconstruction_diagnostics(original_fit, cached, frozen, old_clf, output, input_reports)
+        for name, result in diagnostic["variants"].items():
+            print(f"Training reconstruction {name}: max_abs={result['max_abs_error']:.6f}, "
+                  f"mismatches={result['mismatch_count']}", flush=True)
+        raise ValueError(f"Original v7 fit cannot be reconstructed (max error {reconstruction_error:.3g}); "
+                         "send reconstruction-diagnostics.json. Expanded-data training remains blocked.")
     clf = fit(train_rows, cached, route)
     probabilities = predict(clf, cal_rows, cached, route)
     threshold, calibrated, per_source = calibrate(cal_rows, probabilities)
