@@ -152,3 +152,22 @@ checks remain mandatory.
 
 After pulling, rerun the same `audit` command. If parity passes, share
 `error-audit.json`. If it fails, share the new `parity-diagnostics.json`.
+
+### Legacy flag alias and export name limit
+
+Two additional LIEF 0.11.5 rules apply to cached features: its 32-bit-machine
+flag string is `CHARA_32BIT_MACHINE` (newer versions use `NEED_32BIT_MACHINE`),
+and its export parser removes entries with names longer than 300 bytes.
+The workflow normalizes the flag alias and removes oversized export names,
+updating the named-export count, text summaries, and dependent reviewer features.
+It retains raw attributes and rejects count/text inconsistencies rather than
+inventing an export count. These corrections reproduced the two remaining
+uploaded mismatches to floating-point precision. They operate on existing cached
+attributes, so another archive scan is unnecessary for already covered samples.
+Full-dataset report parity remains required. Run the same `audit` command after
+pulling; send `error-audit.json` when successful.
+
+Reference implementations:
+- https://github.com/lief-project/LIEF/blob/0.11.5/src/PE/EnumToString.cpp
+- https://github.com/lief-project/LIEF/blob/0.11.5/src/PE/Parser.cpp
+- https://github.com/lief-project/LIEF/blob/0.11.5/src/PE/Binary.cpp
