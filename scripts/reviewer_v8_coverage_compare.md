@@ -12,6 +12,7 @@ the original model artifacts are preserved.
 ```powershell
 cd "C:\Users\zacpe\Documents\CSCE 704 Project\Cyber-Analytics-Model"
 git pull --ff-only origin main
+docker build -t blackbox-defense:v14-main-v7 .\defender
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_reviewer_diagnostic.ps1 -Version v7
 ```
 
@@ -24,12 +25,15 @@ git pull --ff-only origin main
   --service-url http://192.168.1.193:8082/
 ```
 
-Dependencies are the existing project environment: numpy, requests, LIEF, and
-pyzipper, plus the repository's defender dependencies. The default manifest is
+Dependencies are the existing project environment: numpy, requests, and pyzipper, plus the repository's defender dependencies. The default manifest is
 `validation-data/reviewer-v8-coverage-development/coverage-manifest.json`.
 
-The service supplies base/adapter/signature-policy components. Modern VM LIEF
-features are normalized using the reviewed Docker compatibility helpers. Every
+The rebuilt service supplies base/adapter/signature-policy components, the exact
+original-v7 feature vector, and ordinary-import libraries through the opt-in
+`/diagnostics/score?include_features=1` response. The comparison uses Docker
+features directly for all 66 shared features, appending the fixed six import
+indicators for the v8 candidates. It does not run VM-side PE extraction.
+The feature payload must match the submitted SHA and frozen v7 feature schema. Every
 sample must reproduce the original v7 Docker reviewer score within 1e-9. The
 service must run original-v7's threshold with route minimum 0 and adapter v2
 disabled. Candidate hashes must match those frozen in the coverage manifest.
@@ -53,7 +57,9 @@ counts overlap. No thresholds are tuned on this pool. It is a development pool,
 not an independent final evaluation, and disjointness does not establish absence
 from upstream base training or malware-family independence.
 
-The script refuses a nonempty output directory. To rerun after correcting a
+The script refuses a nonempty output directory. After an earlier failed run,
+use the rerun command below. Rebuild and restart Docker first to enable the new
+opt-in feature diagnostic; normal classification responses stay unchanged. To rerun after correcting a
 failure, preserve prior diagnostics and supply a fresh output directory:
 
 ```bash
