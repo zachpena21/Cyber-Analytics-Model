@@ -162,6 +162,9 @@ def normalize_cached_flags(cached, feature_names):
         if field == "characteristics_list":
             tokens = [t.removeprefix("HEADER_CHARACTERISTICS.").removeprefix("CHARACTERISTICS.")
                       for t in tokens]
+            # LIEF 0.11.5 EnumToString.cpp uses this historical spelling.
+            tokens = ["CHARA_32BIT_MACHINE" if t == "NEED_32BIT_MACHINE" else t
+                      for t in tokens]
         else:
             tokens = [t.removeprefix("DLL_CHARACTERISTICS.") for t in tokens]
             tokens = [dll_names.get(int(t), t) if t.isdecimal() else t for t in tokens]
@@ -175,6 +178,39 @@ def normalize_cached_flags(cached, feature_names):
                 cached["structural_vector"][index] = float(value)
                 changed = True
     return changed
+
+
+def normalize_cached_exports(cached, feature_names):
+    """Match LIEF 0.11.5 Parser.cpp's MAX_EXPORT_NAME_SIZE = 300 bytes.
+
+    That parser removes oversized named export entries; exported_functions
+    subsequently includes only entries with nonempty names. Preserve the raw
+    extraction while correcting text, counts, and dependent reviewer features.
+    """
+    attributes = cached["attributes"]
+    names = str(attributes.get("exports_list", "") or "").split()
+    kept = [name for name in names if len(name.encode("utf-8")) <= 300]
+    if len(kept) == len(names):
+        return False
+    if len(names) != float(attributes.get("exports", 0)):
+        raise ValueError("Cannot safely normalize export names: count/text mismatch")
+    cached.setdefault("raw_attributes", dict(attributes))
+    attributes = dict(attributes, exports=len(kept), exports_list=" ".join(kept))
+    cached["attributes"] = attributes
+    sections = float(attributes.get("numberof_sections", 0))
+    updates = {
+        "exports": len(kept),
+        "exports_list_token_count": len(kept),
+        "exports_list_unique_count": len(set(kept)),
+        "exports_list_character_count": len(attributes["exports_list"]),
+        "exports_per_section": len(kept) / sections if sections > 0 else 0.,
+        "has_exports": float(bool(kept)),
+        "large_export_table": float(len(kept) >= 32),
+    }
+    for name, value in updates.items():
+        if name in feature_names:
+            cached["structural_vector"][feature_names.index(name) - len(SCORE_FEATURES)] = float(value)
+    return True
 
 
 def needs_import_refresh(sample):
@@ -302,11 +338,14 @@ def collect_features(rows, reviewer, model_path, locations, cache_path, max_byte
                  dict(missing=sorted(wanted), parser_failures=failures,
                       archive_read_warnings=archive_warnings))
             raise ValueError(f"Could not find/parse {len(wanted)} required samples. See extraction-failures.json; first SHA: {sorted(wanted)[0]}")
-    normalized = sum(normalize_cached_flags(sample, reviewer.feature_names)
-                     for sample in cached.values())
+    normalized = 0
+    for sample in cached.values():
+        flags_changed = normalize_cached_flags(sample, reviewer.feature_names)
+        exports_changed = normalize_cached_exports(sample, reviewer.feature_names)
+        normalized += flags_changed or exports_changed
     if normalized:
         dump(cache_path, dict(provenance=provenance, samples=cached))
-        print(f"Restored legacy PE flag text features for {normalized} cached samples; "
+        print(f"Restored legacy PE features for {normalized} cached samples; "
               "raw attributes preserved. Full score parity is still required.", flush=True)
     return cached
 
