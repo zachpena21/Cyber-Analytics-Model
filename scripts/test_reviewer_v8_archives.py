@@ -32,6 +32,31 @@ def damaged_zip(bad_name="autofill/profile.txt", bad_data=b"text"):
 
 
 class ArchiveScanTests(unittest.TestCase):
+    def test_legacy_export_byte_limit_and_dependent_features(self):
+        source = (ROOT / "scripts/reviewer_v8_workflow.py").read_text(encoding="utf-8")
+        function = next(node for node in ast.parse(source).body
+                        if isinstance(node, ast.FunctionDef)
+                        and node.name == "normalize_cached_exports")
+        scope = dict(SCORE_FEATURES=tuple(range(6)))
+        exec(compile(ast.Module(body=[function], type_ignores=[]),
+                     "<actual export compatibility>", "exec"), scope)
+        fields = ["exports", "exports_list_token_count", "exports_list_unique_count",
+                  "exports_list_character_count", "exports_per_section", "has_exports",
+                  "large_export_table", "unrelated_feature"]
+        names = [str(i) for i in range(6)] + fields
+        raw = dict(exports=3, exports_list=" ".join(["A" * 300, "B" * 301, "é" * 151]),
+                   numberof_sections=5)
+        sample = dict(attributes=raw.copy(), structural_vector=[3., 3., 3., 754., .6, 1., 0., 123.])
+        normalize = scope["normalize_cached_exports"]
+        self.assertTrue(normalize(sample, names))
+        self.assertEqual(sample["structural_vector"], [1., 1., 1., 300., .2, 1., 0., 123.])
+        self.assertEqual(sample["raw_attributes"], raw)
+        self.assertEqual(sample["attributes"]["exports_list"], "A" * 300)
+        self.assertFalse(normalize(sample, names))
+        broken = dict(attributes=dict(raw, exports=4), structural_vector=[0.] * 8)
+        with self.assertRaisesRegex(ValueError, "count/text mismatch"):
+            normalize(broken, names)
+
     def test_delay_import_removal_preserves_resolved_ordinal_names(self):
         source = (ROOT / "scripts/reviewer_v8_workflow.py").read_text(encoding="utf-8")
         functions = [node for node in ast.parse(source).body
@@ -85,6 +110,13 @@ class ArchiveScanTests(unittest.TestCase):
         sample["attributes"] = dict(characteristics_list="EXECUTABLE_IMAGE LARGE_ADDRESS_AWARE",
                                     dll_characteristics_list="HIGH_ENTROPY_VA DYNAMIC_BASE NX_COMPAT")
         self.assertFalse(normalize(sample, names))
+        sample["attributes"]["characteristics_list"] = (
+            "CHARACTERISTICS.EXECUTABLE_IMAGE CHARACTERISTICS.NEED_32BIT_MACHINE")
+        sample["structural_vector"][2] = 35.
+        self.assertTrue(normalize(sample, names))
+        self.assertEqual(sample["structural_vector"][2], 36.)
+        self.assertEqual(sample["attributes"]["characteristics_list"],
+                         "CHARACTERISTICS.EXECUTABLE_IMAGE CHARACTERISTICS.NEED_32BIT_MACHINE")
 
     def test_strict_scan_rejects_bad_member(self):
         with zipfile.ZipFile(io.BytesIO(damaged_zip())) as archive:
@@ -126,7 +158,7 @@ class ArchiveScanTests(unittest.TestCase):
         parsed = ast.parse(source)
         functions = [node for node in parsed.body
                      if isinstance(node, ast.FunctionDef)
-                     and node.name in ("collect_features", "normalize_cached_flags", "needs_import_refresh", "legacy_import_attributes")]
+                     and node.name in ("collect_features", "normalize_cached_flags", "normalize_cached_exports", "needs_import_refresh", "legacy_import_attributes")]
         from check_data_overlap import payloads
 
         def dump(path, value):
