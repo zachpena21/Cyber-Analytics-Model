@@ -623,6 +623,7 @@ def reconstruction_diagnostics(rows, cached, frozen, clf, output, input_reports)
         variants[name] = dict(max_abs_error=float(errors.max()),
             mean_abs_error=float(errors.mean()), mismatch_count=int((errors > 1e-8).sum()),
             passed=bool(errors.max() <= 1e-8),
+            stage_count_matches=len(trees) == len(frozen["estimators"]),
             feature_matrix_sha256=hashlib.sha256(features.astype("<f8").tobytes()).hexdigest(),
             initial_raw_score=float(candidate._raw_predict_init(features[:1])[0, 0]),
             first_tree_difference=first_difference,
@@ -704,13 +705,29 @@ def train(rows, cached, frozen, output, input_reports):
     old_clf = fit(original_fit, cached, route)
     Xold = np.array([vector(r, cached[r["sha256"]]) for r in original_fit])
     reconstruction_error = float(np.max(np.abs(old_clf.predict_proba(Xold)[:, 1] - model_probabilities(frozen, Xold))))
+    reconstruction_mode = "docker_compatible"
+    verified_error = reconstruction_error
     if reconstruction_error > 1e-8:
         diagnostic = reconstruction_diagnostics(original_fit, cached, frozen, old_clf, output, input_reports)
         for name, result in diagnostic["variants"].items():
             print(f"Training reconstruction {name}: max_abs={result['max_abs_error']:.6f}, "
                   f"mismatches={result['mismatch_count']}", flush=True)
-        raise ValueError(f"Original v7 fit cannot be reconstructed (max error {reconstruction_error:.3g}); "
-                         "send reconstruction-diagnostics.json. Expanded-data training remains blocked.")
+        raw = diagnostic["variants"].get("raw_extractor_diagnostic_only", {})
+        if not (raw.get("passed") and raw.get("stage_count_matches")
+                and raw.get("first_tree_difference") is None
+                and abs(raw.get("initial_raw_score", math.inf) - frozen["initial_raw_score"]) <= 1e-12):
+            raise ValueError(f"Original v7 fit cannot be reconstructed (max error {reconstruction_error:.3g}); "
+                             "send reconstruction-diagnostics.json. Expanded-data training remains blocked.")
+        reconstruction_mode = "raw_extractor_exact_trees"
+        verified_error = raw["max_abs_error"]
+        print("Original v7 trees reproduced from raw extractor features. "
+              "Training an old-data runtime-aligned control and an expanded-data candidate.", flush=True)
+    # Both models below use the Docker-compatible representation. The old-only
+    # control isolates feature alignment from the effect of adding new batches.
+    original_cal = [r for r in cal_rows if r["source"] in OLD_SOURCES]
+    control_probs = predict(old_clf, original_cal, cached, route)
+    control_threshold, control_calibration, control_by_source = calibrate(original_cal, control_probs)
+    control_payload = export(old_clf, frozen, control_threshold)
     clf = fit(train_rows, cached, route)
     probabilities = predict(clf, cal_rows, cached, route)
     threshold, calibrated, per_source = calibrate(cal_rows, probabilities)
@@ -719,6 +736,27 @@ def train(rows, cached, frozen, output, input_reports):
     parity = float(np.max(np.abs(clf.predict_proba(Xall)[:, 1] - model_probabilities(payload, Xall))))
     if parity > 1e-10:
         raise ValueError(f"Export parity failed: {parity}")
+    control_parity = float(np.max(np.abs(old_clf.predict_proba(Xall)[:, 1]
+                                        - model_probabilities(control_payload, Xall))))
+    if control_parity > 1e-10:
+        raise ValueError(f"Control export parity failed: {control_parity}")
+    comparison = {}
+    for source in sorted({r["source"] for r in cal_rows}):
+        group = [r for r in cal_rows if r["source"] == source]
+        Xgroup = np.array([vector(r, cached[r["sha256"]]) for r in group])
+        frozen_scores = model_probabilities(frozen, Xgroup)
+        frozen_preds = np.array([int(score >= frozen["reviewer_threshold"])
+                                if r["adapter_probability"] >= route
+                                else int(r["adapter_probability"] >= .7)
+                                for r, score in zip(group, frozen_scores)])
+        cp = predict(old_clf, group, cached, route)
+        ep = predict(clf, group, cached, route)
+        comparison[source] = dict(
+            deployed_v7=metrics(group, frozen_preds),
+            old_data_runtime_aligned_control=metrics(group, cp >= control_threshold),
+            expanded_data_candidate=metrics(group, ep >= threshold),
+            control_at_original_threshold=metrics(group, cp >= frozen["reviewer_threshold"]),
+            candidate_at_original_threshold=metrics(group, ep >= frozen["reviewer_threshold"]))
     # Freeze configuration before source holdouts: no candidate ranking on these results.
     folds, oof = [], []
     for source in ("batch-v7", "batch-v11", "reviewer-v4-v9-dev", "reviewer-v5-v10-diagnostic"):
@@ -736,15 +774,27 @@ def train(rows, cached, frozen, output, input_reports):
                             reviewer_probability=float(probability) if r["adapter_probability"] >= route else None,
                             reviewer_threshold=fold_t, current_prediction=int(probability >= fold_t)))
     dump(output / "model.json", payload)
+    dump(output / "control-model.json", control_payload)
+    dump(output / "control-metadata.json", dict(
+        experiment="v7_old_data_runtime_aligned_control", development_only=True,
+        training_sources=list(OLD_SOURCES), configuration=CONFIG, seed=704,
+        route_min=route, reviewer_threshold=control_threshold,
+        calibration=control_calibration, calibration_by_source=control_by_source,
+        runtime_parity_max_abs_error=control_parity,
+        reconstruction_mode=reconstruction_mode, verified_original_reconstruction_error=verified_error))
     dump(output / "split_manifest.json", dict(training=[r["sha256"] for r in train_rows],
          calibration=[r["sha256"] for r in cal_rows], old_source_split_preserved=True))
-    metadata = dict(experiment="boundary_reviewer_v8_data_baseline", development_only=True,
+    metadata = dict(experiment="boundary_reviewer_v8_runtime_aligned_data_baseline", development_only=True,
                     warning="Source holdouts assess this fixed reviewer configuration, not the entire upstream pipeline. No skimmer is fitted; archived v7 scores must not be used as leakage-safe skimmer training scores.",
                     configuration=CONFIG, seed=704, new_source_split_seed=1704, calibration_fraction=.2,
                     sklearn_version=importlib.metadata.version("scikit-learn"), numpy_version=np.__version__,
                     route_min=route, original_threshold=frozen["reviewer_threshold"], reviewer_threshold=threshold,
                     feature_names=frozen["feature_names"], source_counts=dict(Counter(r["source"] for r in rows)),
-                    input_reports=input_reports, original_v7_reconstruction_error=reconstruction_error,
+                    input_reports=input_reports, original_v7_reconstruction_error=verified_error,
+                    original_v7_reconstruction_mode=reconstruction_mode,
+                    runtime_aligned_refit_difference_from_frozen_v7=reconstruction_error,
+                    control_threshold=control_threshold, calibration_comparison_by_source=comparison,
+                    comparison_scope="Shared calibration rows, excluded from control and expanded fits. Thresholds are selected using calibration, so these are development metrics, not independent test results.",
                     runtime_parity_max_abs_error=parity, calibration=calibrated, calibration_by_source=per_source,
                     calibration_at_original_threshold=metrics(cal_rows, probabilities >= frozen["reviewer_threshold"]),
                     leave_one_source_out=folds)
