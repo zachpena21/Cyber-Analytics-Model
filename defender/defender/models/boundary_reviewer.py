@@ -41,6 +41,19 @@ IMPORT_LIBRARIES = ("ntoskrnl.exe", "hal.dll", "ndis.sys", "wdfldr.sys", "ks.sys
 IMPORT_FEATURES = tuple("import_library=" + name for name in IMPORT_LIBRARIES) + (
     "kernel_driver_import_count",
 )
+BUILD_FEATURES = (
+    "linker_major_equals_2", "coff_symbols_present", "debug_directory_absent",
+    "linker2_with_symbols", "linker2_symbols_no_debug_with_tls",
+)
+
+
+def _build_values(attributes):
+    linker2 = float(_finite_number(attributes.get("major_linker_version")) == 2)
+    symbols = float(_finite_number(attributes.get("symbols")) > 0)
+    no_debug = float(_finite_number(attributes.get("has_debug")) == 0)
+    tls = float(_finite_number(attributes.get("has_tls")) > 0)
+    return (linker2, symbols, no_debug, linker2 * symbols,
+            linker2 * symbols * no_debug * tls)
 
 
 def _import_values(attributes):
@@ -129,10 +142,10 @@ class BoundaryReviewer:
                 "reviewer model is missing keys: " + ", ".join(sorted(missing))
             )
         self.format_version = int(payload["format_version"])
-        if self.format_version not in {1, 5, 6, 7, 8}:
+        if self.format_version not in {1, 5, 6, 7, 8, 9}:
             raise ValueError(f"unsupported reviewer format {self.format_version!r}")
-        self.input_dtype = "float32" if self.format_version in {7, 8} else "float64"
-        if self.format_version in {7, 8} and payload.get("input_dtype") != "float32":
+        self.input_dtype = "float32" if self.format_version in {7, 8, 9} else "float64"
+        if self.format_version in {7, 8, 9} and payload.get("input_dtype") != "float32":
             raise ValueError(f"format {self.format_version} reviewer requires float32 input_dtype")
 
         self.route_min = float(payload["route_min"])
@@ -145,16 +158,22 @@ class BoundaryReviewer:
         self.feature_names = tuple(payload["feature_names"])
         self.categories = payload["categories"]
         self.derived_features = tuple(payload.get("derived_features", ()))
-        if self.format_version in {5, 6, 7, 8} and self.derived_features != DERIVED_FEATURES:
+        if self.format_version in {5, 6, 7, 8, 9} and self.derived_features != DERIVED_FEATURES:
             raise ValueError("reviewer derived feature order does not match runtime")
         if self.format_version == 1 and self.derived_features:
             raise ValueError("legacy reviewer unexpectedly contains derived features")
         self.import_features = tuple(payload.get("import_features", ()))
-        if self.format_version == 8:
+        if self.format_version in {8, 9}:
             if self.import_features != IMPORT_FEATURES:
                 raise ValueError("reviewer import feature order does not match runtime")
         elif self.import_features:
             raise ValueError("legacy reviewer unexpectedly contains import features")
+        self.build_features = tuple(payload.get("build_features", ()))
+        if self.format_version == 9:
+            if self.build_features != BUILD_FEATURES:
+                raise ValueError("reviewer build feature order does not match runtime")
+        elif self.build_features:
+            raise ValueError("legacy reviewer unexpectedly contains build features")
 
         expected_names = self._expected_feature_names()
         if self.feature_names != expected_names:
@@ -202,6 +221,7 @@ class BoundaryReviewer:
                 raise ValueError(f"reviewer categories missing {field}")
             names.extend(f"{field}={value}" for value in self.categories[field])
         names.extend(getattr(self, "import_features", ()))
+        names.extend(getattr(self, "build_features", ()))
         return tuple(names)
 
     def _validate_estimators(self, estimators, leaf_name):
@@ -263,6 +283,8 @@ class BoundaryReviewer:
             values.extend(float(actual == value) for value in self.categories[field])
         if self.import_features:
             values.extend(_import_values(attributes))
+        if self.build_features:
+            values.extend(_build_values(attributes))
         if len(values) != len(self.feature_names):
             raise ValueError("reviewer runtime feature count changed")
         return values
