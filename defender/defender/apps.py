@@ -1,5 +1,6 @@
 """HTTP interface required by the black-box defense challenge."""
 
+import hashlib
 import logging
 import os
 import time
@@ -72,9 +73,10 @@ def create_app(model, threshold: float) -> Flask:
         if hasattr(model, "boundary_reviewer"):
             details["reviewer_route_min"] = model.boundary_reviewer.route_min
             details["reviewer_threshold"] = model.boundary_reviewer.threshold
+            details["reviewer_feature_diagnostics"] = True
         return jsonify(**details), 200
 
-    def score_sample(bytez):
+    def score_sample(bytez, include_features=False):
         attributes = PEAttributeExtractor(bytez).extract()
         frame = pd.DataFrame([attributes])
         model = app.config["MODEL"]
@@ -222,6 +224,20 @@ def create_app(model, threshold: float) -> Flask:
                 reviewer_probability=reviewer_probability,
                 reviewer_threshold=reviewer.threshold,
             )
+            if include_features:
+                details.update(
+                    reviewer_feature_names=list(reviewer.feature_names),
+                    reviewer_feature_vector=reviewer._vectorize(
+                        attributes, bytez,
+                        {name: details[name] for name in (
+                            "benign_probability", "adapter_probability",
+                            "base_trigger_raw", "base_trigger_adjusted",
+                            "signature_checked", "signature_verified",
+                        )},
+                    ),
+                    reviewer_libraries=str(attributes.get("libraries", "") or ""),
+                    sample_sha256=hashlib.sha256(bytez).hexdigest(),
+                )
         return details
 
     def classify_request(include_scores):
@@ -234,7 +250,11 @@ def create_app(model, threshold: float) -> Flask:
             return jsonify(error="empty request body"), 400
 
         try:
-            details = score_sample(bytez)
+            details = score_sample(
+                bytez,
+                include_features=include_scores
+                and request.args.get("include_features") == "1",
+            )
         except Exception:
             # Malformed PE files and extractor failures fail closed. This avoids
             # treating parser-crash evasions as benign and still returns quickly.
