@@ -37,6 +37,18 @@ DERIVED_FEATURES = (
     "amd64_pe32plus_many_sections",
     "modern_amd64_linker",
 )
+IMPORT_LIBRARIES = ("ntoskrnl.exe", "hal.dll", "ndis.sys", "wdfldr.sys", "ks.sys")
+IMPORT_FEATURES = tuple("import_library=" + name for name in IMPORT_LIBRARIES) + (
+    "kernel_driver_import_count",
+)
+
+
+def _import_values(attributes):
+    """Fixed ordinary-import identities; no filenames or labels are used."""
+    libraries = {token.replace("\\", "/").rsplit("/", 1)[-1].casefold()
+                 for token in _tokens(attributes.get("libraries"))}
+    flags = [float(name in libraries) for name in IMPORT_LIBRARIES]
+    return tuple(flags + [sum(flags)])
 
 
 def _finite_number(value):
@@ -117,11 +129,11 @@ class BoundaryReviewer:
                 "reviewer model is missing keys: " + ", ".join(sorted(missing))
             )
         self.format_version = int(payload["format_version"])
-        if self.format_version not in {1, 5, 6, 7}:
+        if self.format_version not in {1, 5, 6, 7, 8}:
             raise ValueError(f"unsupported reviewer format {self.format_version!r}")
-        self.input_dtype = "float32" if self.format_version == 7 else "float64"
-        if self.format_version == 7 and payload.get("input_dtype") != "float32":
-            raise ValueError("format 7 reviewer requires float32 input_dtype")
+        self.input_dtype = "float32" if self.format_version in {7, 8} else "float64"
+        if self.format_version in {7, 8} and payload.get("input_dtype") != "float32":
+            raise ValueError(f"format {self.format_version} reviewer requires float32 input_dtype")
 
         self.route_min = float(payload["route_min"])
         self.threshold = float(payload["reviewer_threshold"])
@@ -133,10 +145,16 @@ class BoundaryReviewer:
         self.feature_names = tuple(payload["feature_names"])
         self.categories = payload["categories"]
         self.derived_features = tuple(payload.get("derived_features", ()))
-        if self.format_version in {5, 6, 7} and self.derived_features != DERIVED_FEATURES:
+        if self.format_version in {5, 6, 7, 8} and self.derived_features != DERIVED_FEATURES:
             raise ValueError("reviewer derived feature order does not match runtime")
         if self.format_version == 1 and self.derived_features:
             raise ValueError("legacy reviewer unexpectedly contains derived features")
+        self.import_features = tuple(payload.get("import_features", ()))
+        if self.format_version == 8:
+            if self.import_features != IMPORT_FEATURES:
+                raise ValueError("reviewer import feature order does not match runtime")
+        elif self.import_features:
+            raise ValueError("legacy reviewer unexpectedly contains import features")
 
         expected_names = self._expected_feature_names()
         if self.feature_names != expected_names:
@@ -183,6 +201,7 @@ class BoundaryReviewer:
             if field not in self.categories:
                 raise ValueError(f"reviewer categories missing {field}")
             names.extend(f"{field}={value}" for value in self.categories[field])
+        names.extend(getattr(self, "import_features", ()))
         return tuple(names)
 
     def _validate_estimators(self, estimators, leaf_name):
@@ -242,6 +261,8 @@ class BoundaryReviewer:
         for field in CATEGORICAL_FIELDS:
             actual = str(attributes.get(field, ""))
             values.extend(float(actual == value) for value in self.categories[field])
+        if self.import_features:
+            values.extend(_import_values(attributes))
         if len(values) != len(self.feature_names):
             raise ValueError("reviewer runtime feature count changed")
         return values
