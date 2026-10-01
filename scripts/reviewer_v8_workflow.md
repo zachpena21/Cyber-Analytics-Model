@@ -215,3 +215,23 @@ separates feature alignment from new data rather than attributing both to v8 dat
 
 After pulling, run `train` again. Share `metadata.json`, `control-metadata.json`
 and `split_manifest.json`. Keep production v7 unchanged pending evaluation.
+
+### Tree input precision and model format 7
+
+Scikit-learn converts tree prediction inputs to float32 before comparing against
+its double-precision split thresholds. Format 7 explicitly declares
+`input_dtype: float32`; both the workflow parity evaluator and BoundaryReviewer
+perform that conversion before traversal. Formats 1, 5 and 6 retain their existing
+score behavior so frozen v7 report parity and reconstruction remain unchanged.
+Older runtimes reject format 7; update the checkout and rebuild the Docker image
+before any later deployment of these new control/v8 models.
+
+The previous reviewed structural cache fingerprint is accepted because this
+runtime edit changes scoring only, not the vectorizer or feature constants.
+Existing caches can be reused. The sklearn/export parity guard remains 1e-10.
+A regression test covers values just above a threshold that round onto it in
+float32, and checks legacy behavior and required format-7 precision declarations.
+Reference: https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingClassifier.html
+
+Pull and rerun `train`. On success share `metadata.json`, `control-metadata.json`
+and `split_manifest.json` from `validation-data/reviewer-v8-development`.
