@@ -187,3 +187,31 @@ the raw-attribute coverage so that the alternative can be interpreted accordingl
 
 Pull, rerun `train`, and share `reconstruction-diagnostics.json` if reconstruction
 still fails. The current feature cache and successful scoring audit remain usable.
+
+### Verified training/deployment representation difference
+
+The supplied reconstruction report reproduced every frozen v7 tree exactly on
+the raw extractor representation (maximum score error 1.11e-16), but an old-data
+refit on Docker-compatible features differed. This establishes a historical
+training/deployment feature mismatch. The workflow now permits this specific
+case only when the raw reconstruction has matching stage counts, exactly equal
+tree arrays, matching initial score, and score parity within 1e-8. An unexplained
+reconstruction mismatch still stops training. Raw features remain diagnostic;
+all new deployable candidates are trained on Docker-compatible features.
+
+The experiment now exports two development models using the same configuration,
+route, feature order and Docker-compatible representation:
+- `control-model.json` and `control-metadata.json`: original sources only, with
+  original training/calibration membership preserved.
+- `model.json` and `metadata.json`: original sources plus development v7/v11,
+  with old split membership preserved and separate splits for added sources.
+
+The metadata compares frozen deployed v7, the old-data aligned control, and the
+expanded candidate on shared calibration rows. It includes original-threshold
+comparisons to separate calibration changes. These are development metrics;
+threshold selection uses calibration. Existing source-holdout checks remain.
+Both exports must reproduce sklearn scores before files are written. This control
+separates feature alignment from new data rather than attributing both to v8 data.
+
+After pulling, run `train` again. Share `metadata.json`, `control-metadata.json`
+and `split_manifest.json`. Keep production v7 unchanged pending evaluation.
