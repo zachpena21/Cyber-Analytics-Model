@@ -117,8 +117,11 @@ class BoundaryReviewer:
                 "reviewer model is missing keys: " + ", ".join(sorted(missing))
             )
         self.format_version = int(payload["format_version"])
-        if self.format_version not in {1, 5, 6}:
+        if self.format_version not in {1, 5, 6, 7}:
             raise ValueError(f"unsupported reviewer format {self.format_version!r}")
+        self.input_dtype = "float32" if self.format_version == 7 else "float64"
+        if self.format_version == 7 and payload.get("input_dtype") != "float32":
+            raise ValueError("format 7 reviewer requires float32 input_dtype")
 
         self.route_min = float(payload["route_min"])
         self.threshold = float(payload["reviewer_threshold"])
@@ -130,7 +133,7 @@ class BoundaryReviewer:
         self.feature_names = tuple(payload["feature_names"])
         self.categories = payload["categories"]
         self.derived_features = tuple(payload.get("derived_features", ()))
-        if self.format_version in {5, 6} and self.derived_features != DERIVED_FEATURES:
+        if self.format_version in {5, 6, 7} and self.derived_features != DERIVED_FEATURES:
             raise ValueError("reviewer derived feature order does not match runtime")
         if self.format_version == 1 and self.derived_features:
             raise ValueError("legacy reviewer unexpectedly contains derived features")
@@ -149,7 +152,7 @@ class BoundaryReviewer:
             self._validate_estimators(self.estimators, leaf_name="malware_probability")
         else:
             if self.model_type != "gradient_boosting":
-                raise ValueError("format 6 reviewer must be gradient_boosting")
+                raise ValueError("gradient boosted reviewer has wrong model_type")
             self.learning_rate = float(payload["learning_rate"])
             self.initial_raw_score = float(payload["initial_raw_score"])
             if not math.isfinite(self.learning_rate) or self.learning_rate <= 0.0:
@@ -257,6 +260,11 @@ class BoundaryReviewer:
 
     def score(self, attributes, bytez, **components):
         vector = self._vectorize(attributes, bytez, components)
+        if self.input_dtype == "float32":
+            # sklearn converts tree inputs to float32 before comparing them
+            # against double-precision split thresholds. Legacy formats retain
+            # their original traversal behavior for historical score parity.
+            vector = np.asarray(vector, dtype=np.float32).tolist()
         if self.model_type == "forest":
             return float(
                 np.mean(
