@@ -171,3 +171,19 @@ Reference implementations:
 - https://github.com/lief-project/LIEF/blob/0.11.5/src/PE/EnumToString.cpp
 - https://github.com/lief-project/LIEF/blob/0.11.5/src/PE/Parser.cpp
 - https://github.com/lief-project/LIEF/blob/0.11.5/src/PE/Binary.cpp
+
+### Training reconstruction diagnostics
+
+Report-score parity and reproduction of the original training run are different
+checks. If the latter fails, `train` writes `reconstruction-diagnostics.json`
+before stopping. It records dependency versions, routed source/class counts,
+report hashes, ordered training SHA fingerprints, and the first differing tree.
+A diagnostic alternative also fits raw extractor features from cached attributes
+and compares against the frozen model on the same raw representation. Byte size
+and entropy come from the existing cache; no reparsing is needed. This alternative
+is not a v8 candidate and cannot bypass the Docker-compatible baseline guard.
+If raw attributes are unavailable for some old cache entries, the report exposes
+the raw-attribute coverage so that the alternative can be interpreted accordingly.
+
+Pull, rerun `train`, and share `reconstruction-diagnostics.json` if reconstruction
+still fails. The current feature cache and successful scoring audit remain usable.
