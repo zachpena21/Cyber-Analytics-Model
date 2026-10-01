@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 
 import reviewer_v8_workflow as w
+from defender.models.boundary_reviewer import IMPORT_FEATURES, _import_values
 
 NAMES = ('v7', 'v8_import_upper', 'v8_import_midpoint')
 CATEGORIES = ('kernel_driver_import', 'linker2_with_symbols',
@@ -55,6 +56,8 @@ def load_candidates(manifest, root):
 
 
 def validate_service(info, v7):
+    if not info.get('reviewer_feature_diagnostics'):
+        raise ValueError('Rebuild the Docker image: reviewer feature diagnostics are missing')
     if not info.get('modern_adapter') or not info.get('score_endpoint_enabled'):
         raise ValueError('Requires modern adapter and DF_ENABLE_SCORE_ENDPOINT=1')
     if info.get('modern_adapter_v2') or not info.get('boundary_reviewer'):
@@ -93,12 +96,7 @@ def components(details, info):
     return result
 
 
-def reviewer_score(model, payload, attributes, bytez, upstream):
-    vector = model._vectorize(attributes, bytez, upstream)
-    cached = dict(attributes=dict(attributes), structural_vector=list(vector[len(w.SCORE_FEATURES):]))
-    w.normalize_cached_flags(cached, model.feature_names)
-    w.normalize_cached_exports(cached, model.feature_names)
-    vector = [upstream[k] for k in w.SCORE_FEATURES] + cached['structural_vector']
+def reviewer_score(model, vector):
     # Match the deployed runtime exactly, including Python-float comparisons
     # after float32 conversion (NumPy scalar comparisons vary by version).
     if model.input_dtype == 'float32':
@@ -116,13 +114,32 @@ def verdict(score, model, upstream, adapter_threshold):
     return routed, int(score >= model.threshold) if routed else int(upstream['adapter_probability'] >= adapter_threshold)
 
 
-def compare_one(sample, bytez, attributes, details, info, candidates):
+def compare_one(sample, bytez, details, info, candidates):
     upstream = components(details, info)
+    v7 = candidates['v7'][0]
+    if details.get('sample_sha256') != sample['sha256']:
+        raise ValueError('Service feature payload SHA mismatch')
+    if details.get('reviewer_feature_names') != list(v7.feature_names):
+        raise ValueError('Service feature schema differs from frozen v7')
+    vector = details.get('reviewer_feature_vector')
+    if not isinstance(vector, list) or len(vector) != len(v7.feature_names):
+        raise ValueError('Missing or invalid Docker reviewer feature vector')
+    vector = [float(v) for v in vector]
+    if not all(math.isfinite(v) for v in vector):
+        raise ValueError('Nonfinite Docker reviewer feature')
+    if vector[:len(w.SCORE_FEATURES)] != [upstream[k] for k in w.SCORE_FEATURES]:
+        raise ValueError('Docker vector/upstream component mismatch')
+    if not isinstance(details.get('reviewer_libraries'), str):
+        raise ValueError('Missing Docker ordinary-import libraries')
+    imports = list(_import_values({'libraries': details['reviewer_libraries']}))
     row = dict(sha256=sample['sha256'], label=sample['label'], source=sample['source_id'],
                categories=sample['categories'], **upstream,
                adapter_threshold=float(info['adapter_threshold']))
     for name, (model, payload) in candidates.items():
-        score = reviewer_score(model, payload, attributes, bytez, upstream)
+        expected_names = list(v7.feature_names) + (list(IMPORT_FEATURES) if name != 'v7' else [])
+        if list(model.feature_names) != expected_names:
+            raise ValueError('Candidate feature schema cannot use frozen Docker vector')
+        score = reviewer_score(model, vector + (imports if name != 'v7' else []))
         routed, prediction = verdict(score, model, upstream, row['adapter_threshold'])
         row.update({name+'_score': score, name+'_routed': routed, name+'_prediction': prediction})
     if details['reviewer_routed']:
@@ -178,7 +195,6 @@ def main():
     try:
         import requests
         import pyzipper
-        from defender.models.attribute_extractor import PEAttributeExtractor
         if args.output.exists() and any(args.output.iterdir()):
             raise ValueError('Output directory is not empty; use a new --output directory')
         content = args.manifest.read_bytes()
@@ -203,12 +219,10 @@ def main():
                     sample = wanted[sha]
                     if len(bytez)!=sample['byte_size']:
                         raise ValueError(f'Coverage byte size changed: {sha}')
-                    extractor = PEAttributeExtractor(bytez)
-                    attrs = w.legacy_import_attributes(extractor, extractor.extract())
-                    response = session.post(endpoint+'/diagnostics/score', data=bytez,
+                    response = session.post(endpoint+'/diagnostics/score?include_features=1', data=bytez,
                         headers={'Content-Type':'application/octet-stream'}, timeout=args.api_timeout)
                     response.raise_for_status()
-                    rows.append(compare_one(sample, bytez, attrs, response.json(), info, candidates))
+                    rows.append(compare_one(sample, bytez, response.json(), info, candidates))
                     del wanted[sha]
                     if len(rows)%25==0:
                         print(f'Scored {len(rows)}/{manifest["counts"]["unused_pe"]}', flush=True)
@@ -225,6 +239,7 @@ def main():
         summary=summarize(rows,candidates)
         summary.update(complete=True, role='development',
             scope=manifest['scope'], threshold_tuning=False,
+            feature_source='Docker original-v7 vector plus fixed ordinary-import indicators',
             warning='Development comparison only. These samples are not reserved independent final evaluation.',
             archive_warning_count=len(warnings),
             frozen_candidate_sha256=manifest['frozen_candidate_sha256'])
