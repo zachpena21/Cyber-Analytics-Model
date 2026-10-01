@@ -271,11 +271,13 @@ def collect_features(rows, reviewer, model_path, locations, cache_path, max_byte
         previous = json.loads(cache_path.read_text(encoding="utf-8"))
         previous_provenance = dict(previous.get("provenance", {}))
         # Reviewed runtime revisions retain all legacy-format feature vectors.
-        # Format 8 appends imports only for explicitly opted-in models; this
+        # Formats 8/9 append imports/build indicators only for opted-in models;
+        # this
         # cache is still collected with the original frozen v7 specification.
         if previous_provenance.get("extractor_runtime_sha256") in {
                 "633df581bfcc2b0e1e2023be58da9b9023da386e118048d0223ac0a703248115",
-                "9f8dac6683c83c3bc85408d34ca87af3cd2b30da24bba803fde9e4250034811f"}:
+                "9f8dac6683c83c3bc85408d34ca87af3cd2b30da24bba803fde9e4250034811f",
+                "444e938aaa2e957bcade0154d5c7b810b6a23e9280355168e1b034825e60de45"}:
             previous_provenance["extractor_runtime_sha256"] = fingerprint
         if previous_provenance == provenance:
             cached = previous["samples"]
@@ -360,7 +362,7 @@ def collect_features(rows, reviewer, model_path, locations, cache_path, max_byte
 
 
 def model_probabilities(payload, X):
-    if payload.get("format_version") in {7, 8}:
+    if payload.get("format_version") in {7, 8, 9}:
         if payload.get("input_dtype") != "float32":
             raise ValueError("format 7 reviewer requires float32 input_dtype")
         X = np.asarray(X, dtype=np.float32)
