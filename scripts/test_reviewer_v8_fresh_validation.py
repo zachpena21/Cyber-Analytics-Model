@@ -94,6 +94,16 @@ class FreshValidationTests(unittest.TestCase):
             self.assertTrue(f.read(output/'evaluation-manifest.json')['complete'])
             self.assertEqual(summary['v7_service_parity']['max_abs'],0.)
             self.assertEqual(summary['models']['v8_import_midpoint']['label'],'v8_expanded_fixed_06397')
+            # Additional benign validation does not pretend to measure malware recall.
+            benign_sources=root/'benign-sources.json'
+            f.w.dump(benign_sources,[f.read(root/'sources.json')[0]])
+            with patch.dict(sys.modules,modules),patch('builtins.print'):
+                f.evaluate(Namespace(output=root/'benign-only',bundle=bundle,sources=benign_sources,
+                    service_url='http://test',api_timeout=1,benign_only=True))
+            benign_summary=f.read(root/'benign-only/comparison-summary.json')
+            self.assertEqual(benign_summary['class_scope'],'benign_only')
+            self.assertEqual(benign_summary['malicious'],0)
+            self.assertIsNone(benign_summary['models']['v7']['overall']['tpr'])
 
     def test_freeze_complete_candidate_and_reproduction_guard(self):
         from argparse import Namespace
