@@ -20,6 +20,7 @@ import reviewer_v8_fresh_validation as f
 API='https://mb-api.abuse.ch/api/v1/'
 PACKAGES=('scipy','numpy','scikit-learn','pandas','matplotlib','pillow','lxml','psutil')
 MAX_PE=16*1024*1024
+NETWORK=dict(connect_timeout=20.,read_timeout=180.,attempts=3)
 
 
 def now():return datetime.now(timezone.utc).isoformat()
@@ -33,15 +34,27 @@ def is_pe(data):
 
 
 def download(session,url,limit,headers=None,data=None):
+    import requests
     method=session.post if data is not None else session.get
-    with method(url,headers=headers,data=data,timeout=(15,120),stream=True) as response:
-        response.raise_for_status()
-        chunks=[];size=0
-        for chunk in response.iter_content(1024*1024):
-            size+=len(chunk)
-            if size>limit:raise ValueError('Download exceeds byte limit')
-            chunks.append(chunk)
-        return b''.join(chunks)
+    transient=(requests.Timeout,requests.ConnectionError)
+    for attempt in range(NETWORK['attempts']):
+        try:
+            with method(url,headers=headers,data=data,
+                        timeout=(NETWORK['connect_timeout'],NETWORK['read_timeout']),stream=True) as response:
+                response.raise_for_status()
+                chunks=[];size=0
+                for chunk in response.iter_content(1024*1024):
+                    size+=len(chunk)
+                    if size>limit:raise ValueError('Download exceeds byte limit')
+                    chunks.append(chunk)
+                return b''.join(chunks)
+        except (requests.Timeout,requests.ConnectionError,requests.HTTPError) as error:
+            retryable=isinstance(error,transient) or (
+                error.response is not None and error.response.status_code in (429,500,502,503,504))
+            if not retryable or attempt+1==NETWORK['attempts']:raise
+            pause=min(30,5*2**attempt)
+            print(f'Network {type(error).__name__}: retry {attempt+2}/{NETWORK["attempts"]} in {pause}s',flush=True)
+            time.sleep(pause)
 
 
 def pypi_json(session,url):
@@ -185,7 +198,7 @@ def malware(args,excluded,freeze_hash):
     since=datetime.now(timezone.utc)-timedelta(days=args.days)
     result=dict(complete=False,started_utc=now(),label=1,label_basis='MalwareBazaar supplied labels; metadata retained for provenance review',
         freeze_manifest_sha256=freeze_hash,since_utc=since.isoformat(),target=args.count,samples=[],failures=[],queries=[])
-    headers={'Auth-Key':key};pool={}
+    headers={'Auth-Key':key};pool={};queried=set()
     if resume:
         result=f.read(directory/'collection-summary.json')
         if result['freeze_manifest_sha256']!=freeze_hash or result['target']!=args.count:
@@ -195,11 +208,21 @@ def malware(args,excluded,freeze_hash):
                 raise ValueError('Previously collected malware archive changed')
         since=datetime.fromisoformat(result['since_utc'])
         if (directory/'query-metadata.json').exists():
-            pool={r['sha256_hash']:r for r in f.read(directory/'query-metadata.json')['eligible_samples']}
+            saved=f.read(directory/'query-metadata.json')
+            pool={r['sha256_hash']:r for r in saved['eligible_samples']}
+            result['queries']=saved['queries']
+            queried={r['parameters']['file_type'] for r in result['queries']}
         result['complete']=False
+    attempted=set(result.get('attempted_sha256',[]))
+    if getattr(args,'retry_failed',False):attempted={r['sha256'] for r in result['samples']}
+    result['attempted_sha256']=sorted(attempted)
     f.w.dump(directory/'collection-summary.json',result)
     with requests.Session() as session:
-        for filetype in ([] if pool else args.file_types):
+        for filetype in args.file_types:
+            if filetype in queried:continue
+            print(f'Querying MalwareBazaar {filetype} metadata...',flush=True)
+            result['last_request']=dict(phase='metadata',file_type=filetype,started_utc=now())
+            f.w.dump(directory/'collection-summary.json',result)
             query=dict(query='get_file_type',file_type=filetype,limit=1000)
             value=json.loads(download(session,API,32*1024*1024,headers,query))
             status=value.get('query_status')
@@ -207,13 +230,18 @@ def malware(args,excluded,freeze_hash):
             result['queries'].append(dict(parameters=query,status=status,returned=len(value.get('data') or [])))
             for entry in value.get('data') or []:
                 if eligible_malware(entry,excluded,since):pool[entry['sha256_hash']]=entry
+            f.w.dump(directory/'query-metadata.json',dict(queried_utc=now(),queries=result['queries'],eligible_samples=list(pool.values())))
+            f.w.dump(directory/'collection-summary.json',result)
         f.w.dump(directory/'query-metadata.json',dict(queried_utc=now(),queries=result['queries'],eligible_samples=list(pool.values())))
         # Predetermined hash order avoids choosing by reviewer errors or family recall.
         order=sorted(pool,key=lambda s:sha(('704:'+s).encode()))
-        collected={r['sha256'] for r in result['samples']}
+        collected={r['sha256'] for r in result['samples']};consecutive_timeouts=0
         for digest in order:
             if len(result['samples'])>=args.count:break
-            if digest in collected or digest in excluded:continue
+            if digest in collected or digest in excluded or digest in attempted:continue
+            attempted.add(digest);result['attempted_sha256']=sorted(attempted)
+            result['last_request']=dict(phase='download',sha256=digest,started_utc=now())
+            f.w.dump(directory/'collection-summary.json',result)
             print(f'Downloading malware archive {len(result["samples"])+1}/{args.count}: {digest[:12]}',flush=True)
             try:
                 content=download(session,API,32*1024*1024,headers,dict(query='get_file',sha256_hash=digest))
@@ -221,6 +249,14 @@ def malware(args,excluded,freeze_hash):
                 path=directory/(digest+'.zip');path.write_bytes(content)
                 result['samples'].append(dict(sha256=digest,label=1,path=str(path.resolve()),
                     archive_sha256=sha(content),metadata=pool[digest],collected_utc=now(),**details))
+                consecutive_timeouts=0
+            except (requests.Timeout,requests.ConnectionError) as error:
+                consecutive_timeouts+=1
+                result['failures'].append(dict(sha256=digest,error=type(error).__name__,failed_utc=now()))
+                print(f'Skipped {digest[:12]} after network retries; saved progress',flush=True)
+                f.w.dump(directory/'collection-summary.json',result)
+                if consecutive_timeouts>=3:
+                    raise ValueError('Three consecutive network failures. Progress saved; --resume moves to unattempted samples. Check VM connectivity if this repeats.') from None
             except requests.HTTPError as error:
                 # Stop on authentication, throttling, or server failures; don't hammer the API.
                 result['failures'].append(dict(sha256=digest,error=f'HTTP {error.response.status_code}'))
@@ -269,9 +305,17 @@ def main():
     ap.add_argument('--count',type=int,default=200)
     ap.add_argument('--days',type=int,default=7)
     ap.add_argument('--resume',action='store_true',help='Resume malware collection only; checks prior archive hashes')
+    ap.add_argument('--retry-failed',action='store_true',help='With --resume, retry previously attempted but uncollected samples')
+    ap.add_argument('--connect-timeout',type=float,default=20.)
+    ap.add_argument('--read-timeout',type=float,default=180.)
+    ap.add_argument('--attempts',type=int,default=3)
     ap.add_argument('--file-types',nargs='+',choices=('exe','dll','sys'),default=['exe','dll'])
     args=ap.parse_args()
     try:
+        if min(args.connect_timeout,args.read_timeout,args.attempts)<=0:raise ValueError('Network limits must be positive')
+        NETWORK.update(connect_timeout=args.connect_timeout,read_timeout=args.read_timeout,attempts=args.attempts)
+        if args.retry_failed and (not args.resume or args.command!='malware'):
+            raise ValueError('--retry-failed requires malware --resume')
         if min(args.versions,args.max_download_mb,args.count,args.days)<1:raise ValueError('Limits must be positive')
         if args.count>500:raise ValueError('Use at most 500 downloads per batch')
         if any(not re.fullmatch('cp3[0-9]+',a) for a in args.abis):raise ValueError('Expected ABI such as cp312')
