@@ -113,9 +113,14 @@ class GroupedExperimentTests(unittest.TestCase):
             routed, pred = g.f.c.verdict(score, model, sample['record'], .7)
             sample['record'].update({n + '_score': score, n + '_routed': routed, n + '_prediction': pred})
         g.checked_entry(sha, sample, NAMES, candidates)
+        sample['record']['v8_import_midpoint_score'] += .01
+        # Earlier import-model V8 scores are not expanded-model V8 scores.
+        g.checked_entry(sha, sample, NAMES, candidates, historical=True)
+        with self.assertRaisesRegex(ValueError, 'model=v8_import_midpoint'):
+            g.checked_entry(sha, sample, NAMES, candidates)
         sample['record']['v7_score'] += .01
         with self.assertRaisesRegex(ValueError, 'reproduce frozen'):
-            g.checked_entry(sha, sample, NAMES, candidates)
+            g.checked_entry(sha, sample, NAMES, candidates, historical=True)
 
     def test_completed_evaluation_binds_fresh_cache_labels(self):
         from test_reviewer_v8_coverage_compare import runtime
@@ -137,6 +142,8 @@ class GroupedExperimentTests(unittest.TestCase):
             root = Path(directory); bundle_dir = root / 'bundle'; audit = root / 'audit'; comparison = root / 'evaluation'
             old_sha, fresh_sha = 'a' * 64, 'b' * 64
             old_sample, fresh_sample = scored(old_sha, 0), scored(fresh_sha, 1)
+            # Full loader must distinguish historical and fresh cache models.
+            old_sample['record']['v8_import_midpoint_score'] += .01
             g.f.w.dump(bundle_dir / 'freeze-manifest.json', {'complete': True})
             cache_path = root / 'old-cache.json'
             g.f.w.dump(cache_path, dict(complete=True, samples={old_sha: old_sample}))
