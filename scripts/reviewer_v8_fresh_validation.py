@@ -162,8 +162,11 @@ def evaluate(args):
     w.dump(args.output/'acquisition-audit.json',acquisition)
     if acquisition['archive_warnings']:
         raise ValueError('Unreadable acquisition entries; inspect acquisition-audit.json and repair sources before evaluating')
-    if {r['label'] for r in wanted.values()}!={0,1}:
-        raise ValueError('Fresh SHA-disjoint samples must include both benign and malware classes')
+    labels={r['label'] for r in wanted.values()}
+    if getattr(args,'benign_only',False):
+        if labels!={0}:raise ValueError('--benign-only requires a nonempty benign-only source pool')
+    elif labels!={0,1}:
+        raise ValueError('Fresh SHA-disjoint samples must include both classes; use --benign-only for additional benign validation')
     total=len(wanted);rows=[];warnings=[];endpoint=args.service_url.rstrip('/')
     w.dump(args.output/'evaluation-manifest.json',dict(complete=False,samples=list(wanted.values()),
         freeze_manifest_sha256=t.digest(args.bundle/'freeze-manifest.json'),sources_sha256=t.digest(args.sources),
@@ -197,6 +200,7 @@ def evaluate(args):
         record['by_source']={s:w.metrics([r for r in rows if r['source']==s],
             [r[name+'_prediction'] for r in rows if r['source']==s]) for s in sorted({r['source'] for r in rows})}
     summary.update(complete=True,role='evaluation',threshold_tuning=False,
+        class_scope='benign_only' if getattr(args,'benign_only',False) else 'both_classes',
         scope=manifest['scope'],excluded_overlap_count=len(acquisition['excluded_overlap_sha256']),
         note='Both V8 policies use identical expanded weights. Source provenance is declared, not independently verified. Retain evaluation status only while these results remain unused for tuning.')
     w.dump(args.output/'comparison-scores.json',rows)
@@ -220,6 +224,7 @@ def main():
     eval_ap=sub.add_parser('evaluate')
     eval_ap.add_argument('--bundle',type=Path,default=w.ROOT/'validation-data/reviewer-v8-frozen-validation')
     eval_ap.add_argument('--sources',type=Path,required=True)
+    eval_ap.add_argument('--benign-only',action='store_true',help='Validate additional benign acquisitions; malware detection is not measured')
     eval_ap.add_argument('--service-url',required=True)
     eval_ap.add_argument('--api-timeout',type=float,default=30.)
     eval_ap.add_argument('--output',type=Path,default=w.ROOT/'validation-data/reviewer-v8-fresh-evaluation')
