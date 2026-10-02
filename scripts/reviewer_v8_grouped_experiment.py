@@ -69,7 +69,7 @@ def extra_values(entry, names):
     )))
 
 
-def checked_entry(sha, entry, names, candidates):
+def checked_entry(sha, entry, names, candidates, historical=False):
     row = entry['record']
     vector = entry['feature_vector']
     if (row['sha256'] != sha or row['label'] not in (0, 1)
@@ -82,13 +82,19 @@ def checked_entry(sha, entry, names, candidates):
     if row['adapter_threshold'] != ADAPTER_THRESHOLD or not isinstance(entry['libraries'], str):
         raise ValueError('Cache adapter threshold/imports mismatch')
     flags = list(f.t.e._import_values({'libraries': entry['libraries']}))
-    for name in ('v7', 'v8_import_midpoint'):
+    # Historical cache V8 columns belong to the pre-expansion import models.
+    # Its exact file digest is already bound to the freeze manifest. Reproduce
+    # the common V7 reference here; do not compare historical V8 columns to
+    # the later expanded frozen V8. Fresh caches were scored by expanded V8.
+    for name in (('v7',) if historical else ('v7', 'v8_import_midpoint')):
         model = candidates[name][0]
         score = f.c.reviewer_score(model, vector + (flags if name != 'v7' else []))
         routed, pred = f.c.verdict(score, model, row, ADAPTER_THRESHOLD)
         if (abs(score - row[name + '_score']) > 1e-9
                 or routed != row[name + '_routed'] or pred != row[name + '_prediction']):
-            raise ValueError(f'Cache does not reproduce frozen scores/gates: {sha}')
+            raise ValueError(f'Cache does not reproduce frozen scores/gates: {sha}; '
+                             f'model={name}, max_abs={abs(score - row[name + "_score"]):.12g}, '
+                             f'historical={historical}')
 
 
 def load_inputs(args):
@@ -143,7 +149,7 @@ def load_inputs(args):
     for i, (sha, entry) in enumerate(sorted(entries.items()), 1):
         if i % 1000 == 0:
             print(f'Checking Docker cache parity {i}/{len(entries)}', flush=True)
-        checked_entry(sha, entry, names, candidates)
+        checked_entry(sha, entry, names, candidates, historical=sha in old['samples'])
     return entries, names, hashes, sorted(converted)
 
 
