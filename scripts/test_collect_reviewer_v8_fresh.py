@@ -89,6 +89,55 @@ class CollectionTests(unittest.TestCase):
             Path(sources[0]['path']).write_bytes(b'changed')
             with self.assertRaisesRegex(ValueError,'archive changed'):c.sources(args,'freeze')
 
+    def test_network_retry_discards_partial_stream_and_honors_timeout(self):
+        class Response:
+            def __init__(self,broken):self.broken=broken
+            def __enter__(self):return self
+            def __exit__(self,*args):pass
+            def raise_for_status(self):pass
+            def iter_content(self,*args):
+                yield b'prefix'
+                if self.broken:raise TimeoutError('read stalled')
+                yield b'done'
+        responses=iter([Response(True),Response(False)]);calls=[]
+        def get(*args,**kwargs):calls.append(kwargs);return next(responses)
+        errors=types.SimpleNamespace(Timeout=TimeoutError,ConnectionError=ConnectionError,
+                                     HTTPError=type('HTTPError',(Exception,),{}))
+        with patch.dict(sys.modules,{'requests':errors}),patch.object(c.time,'sleep') as sleep,patch('builtins.print'):
+            value=c.download(types.SimpleNamespace(get=get),'https://test',100)
+        self.assertEqual(value,b'prefixdone');self.assertEqual(len(calls),2)
+        self.assertEqual(calls[0]['timeout'],(20.,180.));sleep.assert_called_once_with(5)
+
+    def test_timeout_checkpoint_resume_moves_past_failed_sha(self):
+        payloads=[pe(str(i).encode()) for i in range(3)]
+        entries=[dict(sha256_hash=c.sha(p),file_type='exe',file_size=len(p),first_seen=c.now()) for p in payloads]
+        order=sorted((e['sha256_hash'] for e in entries),key=lambda s:c.sha(('704:'+s).encode()))
+        payload_by_sha={c.sha(p):p for p in payloads};calls=[]
+        class Session:
+            def __enter__(self):return self
+            def __exit__(self,*args):pass
+        modules={'requests':types.SimpleNamespace(Session=Session,Timeout=TimeoutError,ConnectionError=ConnectionError,
+                   HTTPError=type('HTTPError',(Exception,),{})),
+                 'pyzipper':types.SimpleNamespace(AESZipFile=zipfile.ZipFile)}
+        def downloaded(session,url,limit,headers=None,data=None):
+            if data['query']=='get_file_type':return json.dumps(dict(query_status='ok',data=entries)).encode()
+            digest=data['sha256_hash'];calls.append(digest)
+            if digest==order[0]:raise TimeoutError('timeout')
+            return archive([('sample.exe',payload_by_sha[digest])])
+        with tempfile.TemporaryDirectory() as directory:
+            args=Namespace(output=Path(directory),count=2,days=7,file_types=['exe'],resume=False)
+            with patch.dict(sys.modules,modules),patch.dict(os.environ,{'MALWAREBAZAAR_AUTH_KEY':'secret'}),                 patch.object(c,'download',side_effect=downloaded),patch.object(c.time,'sleep'),patch('builtins.print'):
+                c.malware(args,set(),'freeze')
+                result=c.f.read(args.output/'malware/collection-summary.json')
+                self.assertEqual(result['count'],2);self.assertTrue(result['target_met'])
+                self.assertIn(order[0],result['attempted_sha256'])
+                # Simulate an interrupted batch with no saved success yet: preserve attempts/failure,
+                # remove later attempts so resume must advance past the first timed-out sample.
+                result['samples']=[];result['complete']=False;result['attempted_sha256']=[order[0]]
+                c.f.w.dump(args.output/'malware/collection-summary.json',result)
+                args.resume=True;calls.clear();c.malware(args,set(),'freeze')
+                self.assertEqual(calls,order[1:])
+
     def test_download_is_bounded(self):
         class Response:
             def __enter__(self):return self
@@ -96,7 +145,9 @@ class CollectionTests(unittest.TestCase):
             def raise_for_status(self):pass
             def iter_content(self,*args):return iter([b'123',b'456'])
         session=types.SimpleNamespace(get=lambda *a,**k:Response())
-        with self.assertRaisesRegex(ValueError,'byte limit'):c.download(session,'https://test',5)
+        errors=types.SimpleNamespace(Timeout=TimeoutError,ConnectionError=ConnectionError,HTTPError=type('HTTPError',(Exception,),{}))
+        with patch.dict(sys.modules,{'requests':errors}):
+            with self.assertRaisesRegex(ValueError,'byte limit'):c.download(session,'https://test',5)
 
 
 if __name__=='__main__':unittest.main()
