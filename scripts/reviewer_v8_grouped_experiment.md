@@ -23,6 +23,13 @@ Send `experiment-summary.json` and `group-manifest.json`. The run fits multiple
 models and prints progress after cache checks, each inner fold and each outer
 fold. A fresh output directory is required. To repeat a run, use a new `--output`.
 
+The historical Docker cache contains scores from the earlier import-feature V8
+models, not the subsequently expanded frozen V8. Its entire file hash must match
+the frozen provenance, and its vectors must reproduce frozen V7. Both fresh audit
+caches must reproduce V7 and expanded frozen V8, with labels/components bound to
+their completed evaluations. Historical V8 score columns are not experiment
+features or fitting targets.
+
 ## What is compared
 
 | Variant | Inputs | Fitting |
