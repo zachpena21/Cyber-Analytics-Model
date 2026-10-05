@@ -8,3 +8,28 @@ defender/defender/models/compact/
 *.tar
 *.tar.gz
 validation-data/
+
+# Local environments, tooling and packaging output
+venv/
+env/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+*.log
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+
+# Acquisition credentials stay local; example configuration may be tracked
+.env
+.env.*
+!.env.example
+
+# Deterministic build reconstructions: committed parts remain authoritative
+defender/defender/models/boundary_reviewer_v4_candidate/model.json
+defender/defender/models/boundary_reviewer_v5_candidate/model.json

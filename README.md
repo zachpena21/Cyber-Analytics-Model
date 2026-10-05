@@ -1,395 +1,199 @@
-# Black-Box Malware Defense Baseline
+# Cyber Analytics Malware Defense
 
-This repository turns the 2021 MLSEC `NeedForSpeedModel` sample into a hardened,
-reproducible starting point for the course's first milestone. The original
-sklearn forest requires about 2.0 GiB resident memory when loaded, so the build
-converts it into memory-mapped inference arrays that preserve its predictions.
+A PE malware classifier for the course black-box defense project. The runtime
+combines a compact legacy random forest, a modern linear adapter, and an optional
+boundary reviewer. Training and diagnostics run separately from inference.
 
-## Acceptance targets
+## Current model status — October 5, 2026
 
-| Requirement | Course target | Baseline control |
-|---|---:|---|
-| False-positive rate | <= 1% | Threshold must be selected on a held-out benign set |
-| True-positive rate | >= 95% | Reported with the same frozen threshold |
-| Memory | <= 1 GB RAM | Slim single-process image; benchmark with a 1 GB Docker limit |
-| Response time | <= 5 seconds/sample | Model loads once; synchronous in-memory inference |
-| Interface | HTTP | `POST /`, octet-stream body, JSON integer result |
+| Component | Current state |
+|---|---|
+| Compact legacy forest | Existing runtime base; benign threshold `0.510001` |
+| Modern adapter | Existing coefficients; malware threshold `0.70`; signature-adjusted base verdict is an input |
+| Reviewer v7 | Latest tracked runtime reference: `boundary_reviewer_v7_gbdt_candidate`; 66 features, 128 gradient-boosting trees; route `0.15`, threshold `0.6312998096487621` |
+| Structural v8 | Current primary research candidate; 66 structural/import features; fixed provenance fold 0 with software calibration; route `0.15`, threshold `0.6882517225516912` |
+| Bounded v8 comparison | Same structural trees plus a constrained upstream-score correction; threshold `0.6722878125865038` |
+| Original expanded v8 | Preserved 72-feature reference; calibrated threshold `0.3181019231722836`; fixed comparison threshold `0.6397229919376241` |
 
-The inherited `0.75` threshold is only a starting point. It is not evidence
-that this model meets the course targets on the hidden evaluation distribution.
+**Structural v8 is an offline candidate, not a deployed replacement.** Its bundle
+lives locally at `validation-data/reviewer-v8-structural-frozen-validation/`.
+The original expanded bundle remains at
+`validation-data/reviewer-v8-frozen-validation/`. Both are ignored by Git.
+The default Docker configuration loads the adapter and leaves the reviewer
+disabled; v7 must be explicitly enabled and selected as shown below.
+
+The adapter supplies the routing gate. Routed samples use the reviewer decision;
+samples below the route minimum retain the adapter decision. Structural v8 removes
+six upstream score/signature features from the reviewer's input, but retains the
+adapter routing policy. Its 66 inputs comprise 60 PE structural features and six
+driver-import features. It does not introduce a new adapter or a trained skimmer.
+
+## Latest frozen comparison
+
+The October 5 acquisition contains 526 unique benign PEs from 14 Python 3.13
+Windows x64 wheels across seven package families, and 92 MalwareBazaar PEs.
+Five previously used benign SHAs were excluded during collection; malware
+collection reported zero overlaps and stopped at the download budget before
+reaching its requested 200 samples. The evaluation scored all 618 retained samples.
+
+| Frozen policy | Benign errors / 526 | FPR | Malware detected / 92 | TPR |
+|---|---:|---:|---:|---:|
+| v7 reference | 169 | 32.13% | 67 | 72.83% |
+| Original expanded v8, calibrated | 163 | 30.99% | 85 | 92.39% |
+| **Structural v8 primary** | **2** | **0.38%** | **75** | **81.52%** |
+| Bounded comparison | 2 | 0.38% | 75 | 81.52% |
+
+These are observed results on this particular acquisition, not hidden-course
+performance. SHA disjointness and post-freeze collection do not establish
+software-family/version or malware-family independence. Benign wheels include
+familiar package families/versions. The 92 malware samples also limit precision.
+The project goals remain FPR at most 1% and TPR at least 95%; structural v8 does
+not meet the latter goal on this batch.
+
+Evaluation completed without threshold tuning. v7 service parity error was at
+most `3.33e-16`; subsequent recollection reproduced every recorded score exactly.
+The bounded comparison made no classification changes from the primary.
+
+All 17 structural malware misses were routed. Four were detected by both older
+references, eight only by expanded v8, and five by neither. The two benign errors
+were in Pillow 12.3.0 and lxml 6.1.3. Feature diagnostics suggest testing section
+measurements, import identities, managed-PE metadata, and broader benign coverage.
+These are development hypotheses, not deployed rules or causal explanations.
+
+The acquisition has now been inspected for future feature design. Retain the
+original frozen comparison as recorded evidence; if it informs fitting or tuning,
+treat these 618 SHAs as development and obtain another untouched validation batch.
 
 ## Repository layout
 
-- `defender/`: Docker build context and HTTP service
-- `defender/defender/models/`: feature extractor and model class; staged weights are ignored by Git
-- `defender/test/`: original evaluator plus API contract tests
-- `defender/convert_model.py`: converts the forest during the Docker build
-- `scripts/stage_model.py`: verifies and extracts the supplied model archive
-- `scripts/select_threshold.py`: selects the best threshold subject to an FPR ceiling
+| Path | Purpose |
+|---|---|
+| `defender/` | Docker build context, inference service, model artifacts and API tests |
+| `scripts/` | Collection, training, validation and diagnostic tools; see [workflow index](scripts/README.md) |
+| `validation-data/` | Local samples, caches, reports, frozen bundles and diagnostic copies; ignored by Git |
+| `docs/history/` | Historical setup and development notes |
 
-## 1. Stage the supplied model
+Tracked old model artifacts and experiment scripts are retained for reproducibility.
+Frozen bundles bind script/dependency hashes, so moving or modifying those scripts
+can invalidate existing runs. Reconstructed v4/v5 model JSONs are build products;
+their committed chunk files remain authoritative.
 
-From the repository root:
+## Runtime reference: build and select v7
+
+Stage the verified course forest before the first build:
 
 ```bash
 python scripts/stage_model.py /path/to/NFS_21_ALL_hash_50000_WITH_MLSEC20.zip
+docker build -t blackbox-defense:v7-reference ./defender
 ```
 
-The script verifies both the outer ZIP and inner gzip-pickle SHA-256 hashes
-before placing the model in the Docker context. Never load an untrusted pickle.
-The multi-stage Docker build converts the verified pickle and excludes the
-oversized sklearn forest from the final image.
+The build converts the supplied sklearn forest into memory-mapped arrays.
+The staged pickle and generated compact arrays are not tracked.
 
-## 2. Build and run
+Run the existing v7 cascade locally:
 
 ```bash
-docker build -t blackbox-defense ./defender
-docker run --rm -p 8080:8080 --memory=1g --cpus=1 blackbox-defense
+docker run --rm --name blackbox-defense-v7 \
+  -p 8080:8080 --memory=1g --cpus=1 \
+  -e DF_MODEL_THRESH=0.510001 \
+  -e DF_ENABLE_BOUNDARY_REVIEWER=1 \
+  -e DF_REVIEWER_DIR=/opt/defender/defender/models/boundary_reviewer_v7_gbdt_candidate \
+  blackbox-defense:v7-reference
 ```
 
-Override the threshold without rebuilding:
-
-```bash
-docker run --rm -p 8080:8080 --memory=1g --cpus=1 \
-  -e DF_MODEL_THRESH=0.510001 blackbox-defense
-```
-
-The measured validation set has a collision at benign probability `0.51`: one
-malware sample and three valid Microsoft-signed Windows files share that score.
-The service therefore verifies Authenticode only at that exact score and treats
-the file as benign only when its embedded signature chains to a trusted root and
-the leaf publisher organization is exactly `Microsoft Corporation`. Verification
-failures remain malicious. Set `DF_MICROSOFT_OVERRIDE=0` to disable this policy.
-
-## 3. Verify the API
+The request interface is `POST /`, an octet-stream PE body, and JSON
+`{"result":0}` for benign or `{"result":1}` for malware.
+`GET /healthz` checks readiness and `GET /model` reports configuration.
 
 ```bash
 curl -sS -X POST --data-binary @sample.exe \
-  -H 'Content-Type: application/octet-stream' \
-  http://127.0.0.1:8080/
+  -H 'Content-Type: application/octet-stream' http://127.0.0.1:8080/
 ```
 
-Expected response:
+Scoring and feature diagnostic endpoints are disabled by default. Keep them
+disabled in any final submission.
 
-```json
-{"result":1}
-```
+## Current research workflow
 
-Run the provided efficacy evaluator against separate malicious and benign
-collections without extracting malware archives:
+Use the existing VM `.venv` and update with `git pull --ff-only origin main`.
+Do not overwrite an existing successful freeze or recreate it merely to change
+its acquisition cutoff.
 
-```bash
-cd defender
-python -m test -m /path/to/malware.zip -b /path/to/benign/files
-```
+1. [Structural freeze and evaluation](scripts/reviewer_v8_structural_validation.md):
+   verifies prior grouped controls and freezes existing provenance fold 0.
+   This is not a final full-data refit.
+2. [Structural collection](scripts/collect_reviewer_v8_structural.md):
+   reads the new frozen exclusions, collects benign wheels and hourly malware
+   batches, and writes timestamped `sources.json`. The hourly collector avoids
+   the MalwareBazaar API path that previously returned repeated 502 errors.
+3. Evaluate the frozen policies using original-v7 Docker features.
+4. [Post-evaluation feature diagnostics](scripts/reviewer_v8_structural_feature_diagnostics.md):
+   recollects exact features, verifies all prior decisions/scores, and compares
+   errors with correctly classified controls of the same label.
 
-## 4. Calibrate, then freeze, the threshold
-
-`NeedForSpeedModel.predict_threshold` predicts malware when the model's benign
-class probability is below `DF_MODEL_THRESH`. Increasing the threshold raises
-both TPR and generally FPR.
-
-Export a validation CSV with columns `label,benign_probability`, then run:
-
-```bash
-python scripts/select_threshold.py validation_scores.csv --max-fpr 0.01
-```
-
-Use a validation set that is disjoint from training and from the final test.
-Freeze the selected threshold before reporting FPR/TPR. Because 1% is a tight
-constraint, use enough benign samples to make the estimate meaningful; 100
-benign samples allow only one false positive and provide a very noisy estimate.
-
-## MalwareBazaar validation workflow
-
-MalwareBazaar contains live malware. Obtain instructor/institutional approval
-and use a disposable VM with shared folders and clipboard disabled. Never run
-this workflow on a normal workstation, execute a sample, extract samples to a
-shared location, or commit validation data to Git. The project ignores the
-entire `validation-data/` directory.
-
-1. Obtain a free Auth-Key from <https://auth.abuse.ch/> and review the
-   [MalwareBazaar API and fair-use terms](https://bazaar.abuse.ch/api/).
-2. In the isolated VM, install the updated evaluator dependencies:
-
-   ```powershell
-   .\.venv\Scripts\python.exe -m pip install -r .\defender\requirements.txt
-   ```
-
-3. Put the key only in the current process environment without writing it into
-   source code or PowerShell history:
-
-   ```powershell
-   $secureKey = Read-Host "MalwareBazaar Auth-Key" -AsSecureString
-   $env:MALWAREBAZAAR_AUTH_KEY = [Net.NetworkCredential]::new('', $secureKey).Password
-   ```
-
-4. Start with 100 encrypted PE archives:
-
-   ```powershell
-   .\.venv\Scripts\python.exe .\scripts\download_malwarebazaar.py --count 100 --acknowledge-live-malware
-   ```
-
-   The downloader requests `file_type=exe`, records collection metadata and
-   hashes in `manifest.json`, and never extracts a sample. Downloads remain in
-   their AES-encrypted ZIPs. MalwareBazaar uses the password `infected`.
-
-5. With the defense container running, evaluate the encrypted archive directory
-   directly in memory:
-
-   ```powershell
-   cd defender
-   ..\.venv\Scripts\python.exe -m test -m ..\validation-data\malwarebazaar -b C:\Windows\System32 --max 16777216 --stopafter 5000
-   ```
-
-6. Remove the Auth-Key from the process when finished:
-
-   ```powershell
-   Remove-Item Env:MALWAREBAZAAR_AUTH_KEY
-   ```
-
-Use the first collection only for pipeline testing and provisional threshold
-selection. Collect a separate later set for final reporting so that threshold
-selection and evaluation do not reuse the same malware samples. MalwareBazaar
-is an external stress test and may not match the hidden course distribution.
-
-## MalShare fallback workflow
-
-If MalwareBazaar is unavailable, MalShare can provide a provisional pipeline
-test. MalShare states that not every hosted file is necessarily malicious, so
-do not treat this collection as the final ground-truth TPR set. Keep the same
-disposable-VM isolation used above.
-
-The downloader validates the returned hash and PE signature in memory, then
-writes the sample directly into an AES-256 encrypted ZIP. It never writes a
-plaintext executable.
-
-```bash
-cd "$HOME/Cyber-Analytics-Model"
-source .venv/bin/activate
-read -rsp "MalShare API key: " MALSHARE_API_KEY
-echo
-export MALSHARE_API_KEY
-python scripts/download_malshare.py --count 25 --acknowledge-live-malware
-unset MALSHARE_API_KEY
-```
-
-Encrypted archives and their manifest are saved under
-`validation-data/malshare/`. Evaluate that directory with the same in-memory
-archive reader used for MalwareBazaar, but label the resulting recall as
-provisional MalShare validation rather than final test performance.
-
-## Hardening already applied
-
-- Pins the legacy dependency versions needed to deserialize the provided model.
-- Replaces the ~2.0 GiB in-memory sklearn forest with 325 MiB of memory-mapped
-  arrays; measured idle RSS was ~105 MiB and RSS after inference was ~317 MiB.
-- Preserves reference probabilities in a five-row equivalence smoke test
-  (maximum observed absolute difference: 0.0).
-- Loads the model once at process startup.
-- Rejects wrong content types and empty bodies.
-- Fails closed on malformed PE/parser failures, preventing parser-crash bypasses.
-- Enforces a configurable 16 MiB request ceiling to bound memory use.
-- Runs as an unprivileged container user and includes a health endpoint.
-- Omits the large model pickle from Git history.
-
-## Next measurement gate
-
-Before changing the classifier, collect three baselines under the exact Docker
-limits: held-out FPR/TPR, p95/max latency, and peak container memory. If FPR is
-above 1% at the threshold required for 95% TPR, threshold tuning alone cannot
-meet both constraints; the next iteration should add robust PE features or a
-second-stage detector rather than merely moving the cutoff.
-
-Local smoke measurements on a 108 KB benign PE were 46-62 ms per inference.
-These timings are implementation checks, not efficacy evidence. A small set of
-modern Python/Node Windows launcher executables also produced many false
-positives at `0.75`, reinforcing that the threshold must be calibrated on a
-representative held-out corpus before submission.
-
-Upstream reference:
-[2021 Machine Learning Security Evasion Competition](https://github.com/fabriciojoc/2021-Machine-Learning-Security-Evasion-Competition)
-
-## Modern-sample adapter
-
-The compact legacy forest is augmented with a small linear detector trained on
-recent samples. The adapter uses the existing 250,041 PE features plus the
-legacy model's binary verdict as feature 250,042. The adapter is the final
-decision layer, so it can both recover modern-malware false negatives and
-correct legacy false positives.
-
-At startup, `defender/defender/__main__.py` loads the adapter whenever
-`defender/defender/models/modern_adapter/metadata.json` is present. The
-service verifies that `DF_MODEL_THRESH` matches the base threshold recorded
-during training. The current deployment uses:
-
-- base benign threshold: `0.510001`
-- adapter threshold: `0.70`
-- decision policy: `adapter_with_signature_adjusted_legacy_verdict_feature`
-
-### Development-data collection
-
-On Windows, collect validly signed benign PE files:
+For the existing frozen bundle, start the all-route diagnostic service on
+Windows PowerShell. This helper makes a separate diagnostic model copy, stops
+Docker containers occupying the requested host port, and preserves original weights:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\collect_benign.ps1
+.\scripts\start_reviewer_diagnostic.ps1 -Version v7 -Image blackbox-defense:v7-reference
 ```
 
-For later disjoint collections, use `collect_benign_final.ps1` with an
-exclusion directory containing all previously used benign files. The collector
-deduplicates by SHA-256 and writes a ZIP under `validation-data/`, which is
-ignored by Git.
+Its diagnostic route is zero to expose every score. Offline evaluation still
+uses each frozen policy's original route; the all-route service is not the
+production policy. The default host port is 8082.
 
-MalwareBazaar samples must remain inside an approved disposable VM. The
-downloader stores each sample as an encrypted archive and supports repeated
-`--exclude-manifest` arguments so development and final-test malware remain
-disjoint. The trainer and evaluator read archive members directly into memory;
-they do not extract live malware to disk.
-
-### Source-aware training
-
-Run training from the repository root in the VM:
+On the VM, after fresh collection:
 
 ```bash
-bash scripts/train_modern_adapter.sh \
-  validation-data/malwarebazaar-final-20260922 \
-  validation-data/benign-retrain \
-  http://BASELINE_HOST:8081/ \
-  validation-data/benign-validation.zip
+./.venv/bin/python scripts/reviewer_v8_structural_validation.py evaluate \
+  --sources validation-data/reviewer-v8-structural-fresh-acquisition/sources.json \
+  --service-url http://192.168.1.193:8082/
 ```
 
-The third argument must point to the frozen legacy service calibrated at
-`0.510001`, not to an already adapted service.
-
-When an explicit validation-benign corpus is supplied, the trainer uses a
-source-aware split:
-
-- 80% of development malware for adapter fitting
-- 20% of development malware for calibration
-- all older benign development samples for fitting
-- half of the newer benign corpus for calibration
-- half of the newer benign corpus for an untouched within-run benign check
-
-The adapter's regularization and threshold are chosen on the calibration split
-subject to a maximum 1% calibration FPR. The trainer records model parameters,
-sample counts, split strategy, metrics, and SHA-256 split assignments under
-`defender/defender/models/modern_adapter/`.
-
-The newest corpus becomes development data after it influences model or
-threshold selection. A later disjoint collection is still required for honest
-external evaluation.
-
-### Current measured status
-
-The v3 adapter was trained from 99 development malware samples and 2,831
-signed benign samples. Its source-aware development measurements were:
-
-- calibration: 100% TPR on 20 malware and 0.4% FPR on 500 benign files
-- within-run benign check: 0.2% FPR on 500 benign files
-
-The initial external service run detected 36/36 malware but flagged 34/1,000
-fresh signed benign files. A continuous-score audit of the same samples
-reproduced only 9/1,000 adapter false positives at the deployed threshold. This
-difference exposed training/serving skew in feature 250,042: training and
-offline scoring used the signature-adjusted legacy verdict, while production
-used the raw forest verdict.
-
-The v4 inference path now applies the Microsoft signature policy to the legacy
-verdict feature before adapter scoring. The adapter remains the final decision,
-and a signature cannot directly override an adapter malware verdict. The
-threshold was raised to `0.70`. The rebuilt production service measured:
-
-- 36/36 malware detected: 100% observed TPR
-- 10/1,000 benign files flagged: 1.0% observed FPR
-- zero errors
-- 76 ms average response time and 538 ms maximum response time
-
-The VM-side feature pipeline predicted five false positives at this threshold,
-while the production container produced ten with only four hashes in common.
-Threshold and cascade development must therefore use scores emitted by the
-production runtime rather than scores reconstructed under the VM's newer
-sklearn compatibility layer.
-
-Because the audit batch selected this threshold, it is now development data.
-These figures are not final unbiased performance. Rebuild the service and
-verify the implementation on this batch, then collect new disjoint benign and
-malware samples for the final report.
-
-### Capture exact production scores
-
-The service has a diagnostic endpoint that is disabled by default. Enable it
-only in the isolated development environment; never expose it in the final
-submission:
-
-```powershell
-docker run --rm --name blackbox-defense-score-audit `
-  -p 8080:8080 `
-  --memory=1g `
-  --cpus=1 `
-  -e DF_MODEL_THRESH=0.510001 `
-  -e DF_ENABLE_SCORE_ENDPOINT=1 `
-  blackbox-defense:v4
-```
-
-Then capture exact Docker probabilities from the repository root in the VM:
+Substitute the Windows host IP if different. For diagnostics of a completed run:
 
 ```bash
-git pull origin main
-./.venv/bin/python scripts/analyze_adapter_scores.py \
-  --malicious validation-data/malwarebazaar-unseen-v1 \
-  --benign validation-data/benign-final-3.zip \
-  --service-url http://192.168.1.193:8080/ \
-  --output-prefix validation-data/adapter-score-production-v4
+./.venv/bin/python scripts/test_reviewer_v8_structural_feature_diagnostics.py
+./.venv/bin/python scripts/reviewer_v8_structural_feature_diagnostics.py \
+  --service-url http://192.168.1.193:8082/
 ```
 
-If the actual malware directory has a different name, substitute that path.
-The command reads encrypted malware archives in memory and does not extract
-them. It creates:
+The diagnostic selects the latest completed evaluation matching the exact
+bundle/source hashes; `--evaluation PATH` selects an explicit run. It writes a new
+timestamped output directory with `feature-diagnostic-summary.json`,
+`error-samples.json`, and a complete `feature-cache.json`.
 
-- `adapter-score-production-v4.csv`: SHA-256, label, exact legacy and adapter
-  probabilities, raw and adjusted base verdicts, signature status, and verdict
-- `adapter-score-production-v4.json`: current rates, boundary density, class
-  score quantiles, service metadata, and diagnostic threshold choices
+Keep malware encrypted at rest and read samples in memory in the isolated VM.
+Never execute samples or commit samples, acquisition credentials or local reports.
+Source labels are inherited from their publishers/providers, not independently
+verified ground truth.
 
-The first diagnostic maximizes TPR while keeping observed FPR at or below 1%.
-The second finds the strictest cutoff that still keeps observed TPR at or above
-95%. If no cutoff meets both constraints, threshold tuning alone is
-insufficient and the adapter needs a feature or classifier change. Boundary
-density must be calculated from this production report before selecting the
-routing band for a second-stage reviewer.
+## Submission compatibility: work still required
 
-These diagnostic thresholds are selected using the audit batch. The v4
-adjustment therefore makes this batch development data. Do not report its
-resulting rates as final unbiased performance. Collect new, disjoint benign
-and malware samples and freeze the model before the final test.
+The supplied October 5 instructions require exactly one Dockerfile of at most
+100 KiB in the ZIP, with required COPY inputs inside its containing build context.
+They describe approved Python 3.11/3.12 slim images, a 300-second build limit,
+startup on port 8080 within 25 seconds, non-root execution, a read-only filesystem,
+no runtime network, 1 CPU and 1 GiB RAM.
 
-### Boundary reviewer candidate
+**The current Dockerfile uses Python 3.9 and legacy dependencies. It is not yet
+compatible with the advertised submission base-image policy.** Migrating it is a
+separate runtime/parity task; changing dependencies without validating extracted
+features can change model scores. Exact approved image pins and the full HTTP,
+resource and qualification rules must be checked on the platform Rules page when
+accessible. Do not assume that a successful ZIP upload is a qualification result.
 
-A shallow second-stage forest reviews samples whose adapter malware
-probability is at least `0.50`. It uses the two model scores plus 47 compact PE
-structure features and is evaluated by a custom JSON runtime rather than a
-version-dependent sklearn pickle. The candidate contains 128 depth-2 trees and
-uses a reviewer threshold of `0.6831506122881276`.
+Before submission: migrate and parity-check the approved runtime, package only
+inference inputs, disable diagnostics, and measure clean build time, startup,
+memory and latency under the stated restrictions. No platform qualification or
+hidden evaluation result has been obtained.
 
-On the already-inspected 36-malware/1,000-benign development batch, the
-reviewer changed the adapter result from 10 false positives and zero false
-negatives to one false positive and one false negative. This corresponds to
-0.1% observed FPR and 97.22% observed TPR, but it is not an unbiased final
-result.
+## Historical references
 
-The reviewer is disabled by default. Enable it only for isolated validation:
+The [archived baseline README](docs/history/baseline-readme.md) preserves the early
+adapter/reviewer results and setup notes. Those measurements used earlier
+development batches and are not the current model status.
 
-```powershell
-docker run --rm --name blackbox-defense-reviewer `
-  -p 8080:8080 `
-  --memory=1g `
-  --cpus=1 `
-  -e DF_MODEL_THRESH=0.510001 `
-  -e DF_ENABLE_BOUNDARY_REVIEWER=1 `
-  blackbox-defense:v5-reviewer
-```
-
-Without `DF_ENABLE_BOUNDARY_REVIEWER=1`, the service retains the frozen v4
-adapter behavior. Confirm production-container parity on the development batch,
-then freeze the cascade and use later disjoint malware and benign collections
-for the final efficacy report.
+Upstream base:
+[2021 Machine Learning Security Evasion Competition](https://github.com/fabriciojoc/2021-Machine-Learning-Security-Evasion-Competition).
