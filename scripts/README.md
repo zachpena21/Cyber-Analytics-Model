@@ -10,6 +10,8 @@ Run commands from the repository root; generated data stays in `validation-data/
 | [start_reviewer_diagnostic.ps1](start_reviewer_diagnostic.ps1) | Original-v7 all-route Docker diagnostics on Windows; no change to original weights |
 | [reviewer_v8_structural_validation.py](reviewer_v8_structural_validation.py) | Freeze fixed provenance fold 0 and evaluate fresh acquisitions; [instructions](reviewer_v8_structural_validation.md) |
 | [collect_reviewer_v8_structural.py](collect_reviewer_v8_structural.py) | Collect against structural frozen exclusions and acquisition cutoff; [instructions](collect_reviewer_v8_structural.md) |
+| [collect_reviewer_v8_targeted_benign.py](collect_reviewer_v8_targeted_benign.py) | Stage installed Windows target patterns and remove development overlaps on VM; [instructions](collect_reviewer_v8_targeted_benign.md) |
+| [reviewer_v8_blocker_metadata.py](reviewer_v8_blocker_metadata.py) | Read hash-matched blocker version/import metadata from cached archives |
 | [reviewer_v8_rich_pattern_coverage.py](reviewer_v8_rich_pattern_coverage.py) | Recover blocker archive names and inspect original fit/calibration coverage; [instructions](reviewer_v8_rich_pattern_coverage.md) |
 | [reviewer_v8_rich_blocker_profile.py](reviewer_v8_rich_blocker_profile.py) | Profile blocking calibration benign files and nearby malware with cached features/tree paths; [instructions](reviewer_v8_rich_blocker_profile.md) |
 | [reviewer_v8_rich_calibration_audit.py](reviewer_v8_rich_calibration_audit.py) | Read-only saved-model replay to explain calibration thresholds; [instructions](reviewer_v8_rich_calibration_audit.md) |
@@ -67,6 +69,7 @@ Some tests require VM development dependencies or local artifacts; blanket test
 discovery is not a substitute for the specific workflow's prerequisites.
 Model weights and historical split manifests are deliberate tracked inputs.
 Sample archives, caches, reports, credentials, and frozen bundles remain local.
+
 
 
 
