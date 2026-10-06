@@ -24,6 +24,31 @@ def extras(entries):
 
 
 class RichAblationTests(unittest.TestCase):
+    def test_failed_software_diversity_is_explained_for_every_choice(self):
+        entries = software_pool()
+        for n,e in enumerate(entries.values()):
+            if e['record']['label']==0:
+                e['provenance'] = dict(provenance=dict(package='only-two-'+str(n%2)))
+        features = extras(entries)
+        groups = r.matched_groups(entries,NAMES,features,'template')
+        rows = [entries[k]['record'] for k in sorted(entries)]
+        fold_ids = r.g.group_folds(rows,groups,5)
+        audit = r.split_diversity_audit(entries,NAMES,groups,fold_ids)
+        self.assertEqual(len(audit['candidates']),30)
+        self.assertEqual(audit['held_folds_without_qualifying_choice'],[0,1,2,3,4])
+        for choice in audit['candidates']:
+            self.assertFalse(choice['eligible'])
+            self.assertIn('calibration_software_diversity',choice['blocking_requirements'])
+        with tempfile.TemporaryDirectory() as tmp,patch.object(r,'make_plan') as make,patch.object(r,'panel') as train:
+            make.side_effect = [ValueError('blocked'),({},[])]
+            plans,summary = r.preflight(entries,NAMES,features,['provenance','template'],Path(tmp))
+            self.assertEqual(make.call_count,2)
+            self.assertFalse(summary['all_panels_qualify'])
+            self.assertTrue(summary['complete'])
+            self.assertEqual(set(plans),{'template'})
+            self.assertEqual(summary['modes']['provenance']['error'],'blocked')
+            train.assert_not_called()
+
     def test_schemas_remove_scores_and_add_only_requested_block(self):
         entries = pool(groups=2,size=2)
         features = extras(entries)

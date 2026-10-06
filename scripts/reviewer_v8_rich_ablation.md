@@ -60,6 +60,20 @@ with 20 samples each. If grouping makes that impossible, the script stops and
 leaves `grouping-audit.json` files. Inspect those before revising an assumption;
 do not split aliases or search seeds until a desired performance appears.
 
+For an explicit audit without fitting:
+
+```bash
+./.venv/bin/python scripts/reviewer_v8_rich_ablation.py --audit-only --debug
+```
+
+This examines both panels even when one is blocked. Send
+`rich-split-audit-summary.json` from the new output directory. It includes
+component/source sizes, each outer fold's malware and software counts, all 30
+possible two-fold calibration choices per panel, and the specific blocking
+requirements. `complete: true` means the audit finished; `all_panels_qualify`
+separately reports whether training can proceed. No seed, group or minimum is
+changed by this command.
+
 ## Calibration and reporting
 
 Each model chooses its own threshold on its shared calibration rows. Ordinary
@@ -82,8 +96,8 @@ marked development-only and unsupported by the production runtime.
 
 Send `rich-ablation-comparison-summary.json` after completion. Keep the detailed
 score files, models, grouping audits and split manifests on the VM. If the script
-stops during split planning, send each available panel's `grouping-audit.json`
-and the error/traceback. No full-data final refit is performed here.
+stops during split planning, send `rich-split-audit-summary.json` and the
+error/traceback. No full-data final refit is performed here.
 
 The richer control is refitted on this expanded pool and new split links, so it
 is not expected to reproduce an older model's weights or scores. Prior knowledge

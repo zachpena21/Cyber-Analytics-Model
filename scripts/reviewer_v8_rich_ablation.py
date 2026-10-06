@@ -133,6 +133,39 @@ def matched_groups(entries, names, features, mode):
     return {k:find(k) for k in entries}
 
 
+def split_diversity_audit(entries, names, groups, fold_ids):
+    """Explain all count/provenance-only choices; do not relax or search splits."""
+    keys = sorted(entries)
+    rows = [entries[k]['record'] for k in keys]
+    fingerprints = {k:s.stable_fingerprint(entries[k],names) for k in keys}
+    count = int(max(fold_ids))+1
+    def profile(ids):
+        selected = [rows[i] for i in ids]
+        return dict(count=len(selected), labels=dict(Counter('malware' if r['label'] else 'benign' for r in selected)),
+                    malware=c.diversity(selected,groups,fingerprints), software=s.software_diversity(selected,entries),
+                    software_benign_counts={name:len(v) for name,v in s.software_ids(selected,entries).items()})
+    report = dict(complete=True, role='count_only_split_diversity_audit', training=False, seed=g.SEED,
+                  outer_fold_profiles={str(n):profile(np.flatnonzero(fold_ids==n)) for n in range(count)},
+                  candidates=[], held_folds_without_qualifying_choice=[],
+                  requirements=dict(min_routed_malware=c.MIN_MALWARE,min_malware_groups=c.MIN_MALWARE_GROUPS,
+                                    max_malware_group_share=c.MAX_GROUP_SHARE,min_software_groups=s.MIN_SOFTWARE_GROUPS,
+                                    min_benign_per_software=s.MIN_SOFTWARE_BENIGN))
+    for held in range(count):
+        eligible = 0
+        for cal_folds in itertools.combinations([n for n in range(count) if n!=held],2):
+            cal = np.flatnonzero(np.isin(fold_ids,cal_folds))
+            fit = np.flatnonzero((fold_ids!=held) & ~np.isin(fold_ids,cal_folds))
+            profiles = dict(fit=profile(fit),calibration=profile(cal))
+            failures = [role+'_'+kind+'_diversity' for role,p in profiles.items()
+                        for kind in ('malware','software') if not p[kind]['diverse']]
+            eligible += not failures
+            report['candidates'].append(dict(held_fold=held,calibration_folds=list(cal_folds),
+                                              eligible=not failures,blocking_requirements=failures,**profiles))
+        if not eligible:
+            report['held_folds_without_qualifying_choice'].append(held)
+    return report
+
+
 def make_plan(entries, names, features, mode, output):
     keys = sorted(entries)
     rows = [entries[k]['record'] for k in keys]
@@ -147,6 +180,7 @@ def make_plan(entries, names, features, mode, output):
         largest_groups=[dict(group=k,**v) for k,v in sorted(overview.items(),key=lambda x:-x[1]['count'])[:15]],
         grouping_rule='Union prior entropy-invariant panel groups with coarse build+section/import/CLR shapes. These are conservative split links, not verified malware families.'))
     fold_ids = g.group_folds(rows, groups, 5)
+    cache.dump(output/'split-diversity-audit.json',split_diversity_audit(entries,names,groups,fold_ids))
     plan = s.split_plan(rows, groups, fingerprints, fold_ids, entries)
     manifest = dict(role='rich_feature_development', mode=mode, seed=g.SEED, groups=groups, folds=[])
     for fold in plan:
@@ -163,6 +197,27 @@ def make_plan(entries, names, features, mode, output):
         raise ValueError('Plan must hold every SHA exactly once')
     cache.dump(output / 'split-manifest.json', manifest)
     return groups, plan
+
+
+def preflight(entries, names, features, modes, output):
+    """Check every panel even if one fails, and return an uploadable audit."""
+    plans = {}
+    summary = dict(complete=False,role='rich_ablation_split_audit',training=False,modes={})
+    for mode in modes:
+        try:
+            plans[mode] = make_plan(entries,names,features,mode,output/mode)
+            record = dict(qualifying_plan=True,error=None)
+        except ValueError as error:
+            record = dict(qualifying_plan=False,error=str(error))
+        for filename,key in (('grouping-audit.json','grouping'),('split-diversity-audit.json','split_diversity')):
+            path = output/mode/filename
+            if path.is_file():
+                record[key] = cache.read(path)
+        summary['modes'][mode] = record
+        cache.dump(output/'rich-split-audit-summary.json',summary)
+    summary.update(complete=True,all_panels_qualify=len(plans)==len(modes))
+    cache.dump(output/'rich-split-audit-summary.json',summary)
+    return plans,summary
 
 
 def software_rates(rows, pred, entries):
@@ -260,13 +315,23 @@ def run(args):
     hashes[str(Path(__file__))] = cache.digest(__file__)
     g.f.fresh_output(args.output)
     cache.dump(args.output/'inputs.json', dict(role='development', rich_cache=str(args.cache), input_sha256=hashes,
+        audit_only=args.audit_only,
         converted_acquisition_sha256=converted, modes=args.mode, variants=list(VARIANTS),
         grouping_shape_features=list(SHAPE_NAMES), configuration=g.f.w.CONFIG, seed=g.SEED,
         dependency_versions={name:importlib.metadata.version(name) for name in ('numpy','scikit-learn','scipy')},
         threshold_policy='Max calibration recall subject to <=1% overall/source FPR; software policy also caps identified software groups. Five outer folds, two calibration folds chosen by counts/provenance only.'))
     cache.dump(args.output/'excluded-sha256.json',sorted(entries))
     # Preflight every requested panel before fitting any model.
-    plans = {mode:make_plan(entries,names,features,mode,args.output/mode) for mode in args.mode}
+    plans,split_audit = preflight(entries,names,features,args.mode,args.output)
+    if args.audit_only:
+        cache.verify_hashes(hashes)
+        v.load_bundle(args.structural_bundle)
+        print(f'Complete split audit: {args.output}\nAll panels qualify: {split_audit["all_panels_qualify"]}\n'
+              'Send rich-split-audit-summary.json. No models were fitted.',flush=True)
+        return
+    if not split_audit['all_panels_qualify']:
+        failed = {mode:r['error'] for mode,r in split_audit['modes'].items() if not r['qualifying_plan']}
+        raise ValueError(f'Split planning blocked: {failed}; send {args.output/"rich-split-audit-summary.json"}')
     combined = dict(complete=False, role='matched_rich_feature_development', sample_count=len(entries),
                     rich_cache=str(args.cache), new_development_samples=len(converted), modes={},
                     deployment_changed=False, final_refit=False, independent_validation=False)
@@ -298,6 +363,7 @@ def main():
     ap.add_argument('--mode',choices=c.MODES,action='append',help='Default: provenance and template panels')
     ap.add_argument('--output',type=Path,default=root/('reviewer-v8-rich-ablation-development-'+datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')))
     ap.add_argument('--debug',action='store_true')
+    ap.add_argument('--audit-only',action='store_true',help='Audit both split panels without fitting, even if planning fails')
     args = ap.parse_args()
     args.root = root
     args.mode = args.mode or list(c.MODES)
