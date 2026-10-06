@@ -88,6 +88,15 @@ examines the high fold thresholds without fitting or selecting thresholds from
 held labels. No richer candidate has been selected or deployed; frozen bundles
 and runtime weights remain unchanged.
 
+The completed calibration audit reproduced saved held scores exactly. In every
+import-model fold, the next threshold adding calibration malware detections
+breached a source/software FPR cap. Historical v6 benign data and Windows Kits
+were recurring blockers; final threshold tie-breaking accounts for only small
+threshold gaps without additional calibration detections. The
+[blocker profile](scripts/reviewer_v8_rich_blocker_profile.md) inspects their
+cached filenames, provenance, features and paths against calibration-only
+neighbors. It fits nothing and changes no labels, gates or model weights.
+
 ## Repository layout
 
 | Path | Purpose |
@@ -234,4 +243,5 @@ development batches and are not the current model status.
 
 Upstream base:
 [2021 Machine Learning Security Evasion Competition](https://github.com/fabriciojoc/2021-Machine-Learning-Security-Evasion-Competition).
+
 
