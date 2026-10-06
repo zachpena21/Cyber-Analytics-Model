@@ -4,7 +4,7 @@ A PE malware classifier for the course black-box defense project. The runtime
 combines a compact legacy random forest, a modern linear adapter, and an optional
 boundary reviewer. Training and diagnostics run separately from inference.
 
-## Current model status — October 5, 2026
+## Current model status — October 6, 2026
 
 | Component | Current state |
 |---|---|
@@ -60,9 +60,17 @@ were in Pillow 12.3.0 and lxml 6.1.3. Feature diagnostics suggest testing sectio
 measurements, import identities, managed-PE metadata, and broader benign coverage.
 These are development hypotheses, not deployed rules or causal explanations.
 
-The acquisition has now been inspected for future feature design. Retain the
-original frozen comparison as recorded evidence; if it informs fitting or tuning,
-treat these 618 SHAs as development and obtain another untouched validation batch.
+The acquisition has now informed richer feature design. These 618 SHAs are
+**development data** for the next experiment. Retain the original frozen comparison
+as recorded evidence and obtain another untouched batch for any selected model.
+
+Rich feature collection completed for all 13,245 development SHAs (12,764 benign,
+481 malware): 17 section, 24 ordinary-import and nine managed-PE features. Every
+required SHA was recovered and parsed; logged archive warnings did not prevent
+complete coverage. The [five-way matched ablation workflow](scripts/reviewer_v8_rich_ablation.md)
+is ready to run on the VM. It compares a newly fitted structural control with
+individual feature blocks and all blocks combined. No richer candidate has yet
+been selected or deployed; frozen bundles and runtime weights remain unchanged.
 
 ## Repository layout
 
@@ -130,6 +138,11 @@ its acquisition cutoff.
 4. [Post-evaluation feature diagnostics](scripts/reviewer_v8_structural_feature_diagnostics.md):
    recollects exact features, verifies all prior decisions/scores, and compares
    errors with correctly classified controls of the same label.
+5. [Rich feature cache](scripts/reviewer_v8_rich_feature_cache.md):
+   collects additional section/import/CLR features for the expanded development pool.
+6. [Matched rich-feature ablations](scripts/reviewer_v8_rich_ablation.md):
+   compares five variants on shared group-disjoint splits with source/software FPR
+   constraints, paired changes and export parity. No final full-data refit or deployment.
 
 For the existing frozen bundle, start the all-route diagnostic service on
 Windows PowerShell. This helper makes a separate diagnostic model copy, stops
