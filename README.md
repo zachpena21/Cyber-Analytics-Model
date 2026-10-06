@@ -68,9 +68,25 @@ Rich feature collection completed for all 13,245 development SHAs (12,764 benign
 481 malware): 17 section, 24 ordinary-import and nine managed-PE features. Every
 required SHA was recovered and parsed; logged archive warnings did not prevent
 complete coverage. The [five-way matched ablation workflow](scripts/reviewer_v8_rich_ablation.md)
-is ready to run on the VM. It compares a newly fitted structural control with
-individual feature blocks and all blocks combined. No richer candidate has yet
-been selected or deployed; frozen bundles and runtime weights remain unchanged.
+completed on template-grouped splits. Software-calibrated pooled results were:
+
+| Development variant | Malware detected / 481 | Benign errors / 12,764 |
+|---|---:|---:|
+| Newly fitted structural control | 220 | 12 |
+| Plus section features | 195 | 23 |
+| Plus ordinary-import features | 229 | 13 |
+| Plus managed-PE features | 222 | 12 |
+| All added blocks | 199 | 11 |
+
+Import features are the strongest development lead: net nine additional malware
+detections and one additional benign error versus the matched control. Their gain
+is concentrated in two of five folds. The provenance panel could not satisfy the
+predeclared diversity rules because conservative links formed a large component;
+these template results do not establish software-family independence. A
+[read-only calibration audit](scripts/reviewer_v8_rich_calibration_audit.md)
+examines the high fold thresholds without fitting or selecting thresholds from
+held labels. No richer candidate has been selected or deployed; frozen bundles
+and runtime weights remain unchanged.
 
 ## Repository layout
 
@@ -143,6 +159,9 @@ its acquisition cutoff.
 6. [Matched rich-feature ablations](scripts/reviewer_v8_rich_ablation.md):
    compares five variants on shared group-disjoint splits with source/software FPR
    constraints, paired changes and export parity. No final full-data refit or deployment.
+7. [Rich calibration audit](scripts/reviewer_v8_rich_calibration_audit.md):
+   replays saved models and examines calibration constraints and tie-breaking;
+   evaluates no alternative thresholds on held data.
 
 For the existing frozen bundle, start the all-route diagnostic service on
 Windows PowerShell. This helper makes a separate diagnostic model copy, stops
@@ -184,6 +203,11 @@ verified ground truth.
 
 ## Submission compatibility: work still required
 
+The October 6 update cancels the online platform and moves submission to Canvas.
+Submit the same defense content through a hosted ZIP link, a GitHub repository
+with grader access, or Docker Hub. Grading will use a local version of the platform.
+No final release or submission has been made.
+
 The supplied October 5 instructions require exactly one Dockerfile of at most
 100 KiB in the ZIP, with required COPY inputs inside its containing build context.
 They describe approved Python 3.11/3.12 slim images, a 300-second build limit,
@@ -193,9 +217,9 @@ no runtime network, 1 CPU and 1 GiB RAM.
 **The current Dockerfile uses Python 3.9 and legacy dependencies. It is not yet
 compatible with the advertised submission base-image policy.** Migrating it is a
 separate runtime/parity task; changing dependencies without validating extracted
-features can change model scores. Exact approved image pins and the full HTTP,
-resource and qualification rules must be checked on the platform Rules page when
-accessible. Do not assume that a successful ZIP upload is a qualification result.
+features can change model scores. The Canvas update does not explicitly change the previous runtime restrictions.
+Confirm any revised approved image pins and runtime rules with the course's
+published instructions before packaging the final defense.
 
 Before submission: migrate and parity-check the approved runtime, package only
 inference inputs, disable diagnostics, and measure clean build time, startup,
@@ -210,3 +234,4 @@ development batches and are not the current model status.
 
 Upstream base:
 [2021 Machine Learning Security Evasion Competition](https://github.com/fabriciojoc/2021-Machine-Learning-Security-Evasion-Competition).
+
