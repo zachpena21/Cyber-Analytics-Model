@@ -8,9 +8,12 @@ import argparse
 from collections import Counter
 from datetime import datetime, timezone
 import hashlib
+import io
 import json
 import math
 from pathlib import Path
+import traceback
+import zipfile
 
 import reviewer_v8_rich_features as rich
 
@@ -64,6 +67,62 @@ def validate_feature(feature):
         raise ValueError('Invalid rich feature schema/status')
 
 
+def archive_payloads(archive, reader, on_error, origin):
+    """Read malformed empty member names without calling ZipInfo.is_dir().
+
+    Python/pyzipper ZipInfo.is_dir indexes filename[-1], which fails for an
+    empty name. Such members may still contain required sample bytes.
+    """
+    for entry in archive.infolist():
+        if entry.filename.endswith('/'):
+            continue
+        if not entry.filename:
+            on_error(dict(archive=str(origin), member='', error='EmptyMemberName',
+                          message='Empty ZIP member name; payload read by ZipInfo identity'))
+        try:
+            data = archive.read(entry, pwd=b'infected')
+            if data[:2] == b'MZ':
+                yield data
+                continue
+            stream = io.BytesIO(data)
+            if zipfile.is_zipfile(stream):
+                stream.seek(0)
+                nested_origin = str(origin) + '!/' + (entry.filename or '<empty-name>')
+                with reader(stream) as nested:
+                    yield from archive_payloads(nested, reader, on_error, nested_origin)
+        except Exception as error:
+            on_error(dict(archive=str(origin), member=entry.filename,
+                          compression_method=entry.compress_type,
+                          error=type(error).__name__, message=str(error)))
+
+
+def payloads(path, reader, on_error):
+    """Local tolerant archive reader; completion still requires every target SHA."""
+    with path.open('rb') as stream:
+        header = stream.read(2)
+    if header == b'MZ':
+        yield path.read_bytes()
+        return
+    try:
+        if zipfile.is_zipfile(path):
+            with reader(str(path)) as archive:
+                yield from archive_payloads(archive, reader, on_error, str(path))
+    except Exception as error:
+        on_error(dict(archive=str(path), member=None, error=type(error).__name__, message=str(error)))
+
+
+def verify_resume_identity(saved, current):
+    # Collection orchestration may be repaired between runs. The feature parser
+    # and all model/input/provenance hashes must still match exactly.
+    collector = str(Path(__file__))
+    def comparable(record):
+        result = dict(record)
+        result['input_sha256'] = {p:h for p,h in record['input_sha256'].items() if p != collector}
+        return result
+    if comparable(saved) != comparable(current):
+        raise ValueError('Resume inputs/configuration/parser changed; use a new output directory')
+
+
 def collect(paths, entries, payloads, reader, features, warnings, checkpoint):
     """SHA matching is authoritative; every requested sample must be recovered."""
     wanted = set(entries) - set(features)
@@ -76,8 +135,11 @@ def collect(paths, entries, payloads, reader, features, warnings, checkpoint):
             sha = hashlib.sha256(bytez).hexdigest()
             if sha not in wanted:
                 continue
-            feature = rich.extract(bytez, entries[sha]['libraries'])
-            validate_feature(feature)
+            try:
+                feature = rich.extract(bytez, entries[sha]['libraries'])
+                validate_feature(feature)
+            except Exception as error:
+                raise RuntimeError(f'Rich parser failed for SHA {sha} from {path}: {error}') from error
             feature.update(raw_sha256=sha, byte_size=len(bytez), location=str(path))
             features[sha] = feature
             wanted.remove(sha)
@@ -208,8 +270,8 @@ def run(args):
     features, warnings = {}, []
     if args.resume:
         args.output = args.resume
-        if read(args.output / 'collection-inputs.json') != identity:
-            raise ValueError('Resume inputs/configuration changed; use a new output directory')
+        saved_identity = read(args.output / 'collection-inputs.json')
+        verify_resume_identity(saved_identity, identity)
         partial = read(args.output / 'partial-rich-feature-cache.json')
         features = partial['samples']
         warnings = read(args.output / 'archive-read-warnings.json')
@@ -221,6 +283,9 @@ def run(args):
                     or feature['values'][len(rich.SECTION_NAMES):len(rich.SECTION_NAMES)+len(rich.IMPORT_NAMES)]
                     != rich.import_values(entries[sha]['libraries'])):
                 raise ValueError('Invalid resume sample: ' + sha)
+        if saved_identity != identity:
+            dump(args.output / 'previous-collection-inputs.json', saved_identity)
+            dump(args.output / 'collection-inputs.json', identity)
     else:
         if args.output.exists() and any(args.output.iterdir()):
             raise ValueError('Output is not empty; pass --resume with that directory or use a new one')
@@ -231,7 +296,7 @@ def run(args):
     checkpoint()
     print(f'Output: {args.output}\nCollecting {len(entries)} development SHAs; newly converted: {len(converted)}', flush=True)
     try:
-        missing = collect(candidate_files(args.scan_root), entries, v.w.payloads, pyzipper.AESZipFile,
+        missing = collect(candidate_files(args.scan_root), entries, payloads, pyzipper.AESZipFile,
                           features, warnings, checkpoint)
     finally:
         checkpoint()
@@ -277,6 +342,7 @@ def main():
     ap.add_argument('--scan-root', type=Path, action='append', help='Repeat for sample files/directories; default validation-data')
     ap.add_argument('--output', type=Path)
     ap.add_argument('--resume', type=Path, help='Resume interrupted collection in this output directory')
+    ap.add_argument('--debug', action='store_true', help='Print full traceback on failure')
     args = ap.parse_args()
     args.root = root
     args.scan_root = [p.resolve() for p in (args.scan_root or [root])]
@@ -292,6 +358,8 @@ def main():
     try:
         run(args)
     except Exception as error:
+        if args.debug:
+            traceback.print_exc()
         ap.exit(2, f'V8 rich feature collection stopped: {error}\n')
 
 

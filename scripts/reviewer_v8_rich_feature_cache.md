@@ -52,11 +52,18 @@ To resume, use the output path printed by the interrupted run:
   --resume validation-data/reviewer-v8-rich-feature-cache-TIMESTAMP
 ```
 
-Resume requires identical cached inputs, parser/scripts, and scan roots. Restore
+Resume requires identical cached inputs, feature parser, model dependencies,
+and scan roots. Collector orchestration fixes may change; the previous input
+record is retained and existing feature-parser hashes must still match. Restore
 missing archives under the same roots before resuming. To scan other locations,
 start a new run and repeat `--scan-root` for every desired root (these replace
 the default). Use `--diagnostics PATH` to select a specific completed diagnostic
 directory. Do not rerun a freeze or change its dependency files.
+
+Empty ZIP member names are logged and their payloads are read by entry identity,
+avoiding `ZipInfo.is_dir()`'s empty-name indexing error. Other archive failures
+are recorded while complete required SHA coverage remains mandatory. Use
+`--debug` to print a full traceback if the collector stops unexpectedly.
 
 Next: compare structural-only control, each feature block individually, and all
 blocks on identical group-disjoint fit/calibration/held splits. The richer features

@@ -7,6 +7,7 @@ import struct
 import tempfile
 from types import SimpleNamespace as NS
 import unittest
+import zipfile
 
 import reviewer_v8_rich_features as r
 import reviewer_v8_rich_feature_cache as c
@@ -45,6 +46,33 @@ def values(data, libraries=''):
 
 
 class Features(unittest.TestCase):
+    def test_empty_zip_member_preserves_payload(self):
+        # pyzipper's older ZipInfo implementation indexes the final character.
+        # Current stdlib versions may already handle the empty string safely.
+        class LegacyInfo(zipfile.ZipInfo):
+            def is_dir(self):
+                return self.filename[-1] == '/'
+        member = LegacyInfo('')
+        with self.assertRaises(IndexError):
+            member.is_dir()
+        data = bytes(pe())
+        archive = NS(infolist=lambda:[member], read=lambda entry,pwd:data)
+        warnings = []
+        found = list(c.archive_payloads(archive, None, warnings.append, 'fixture.zip'))
+        self.assertEqual(found, [data])
+        self.assertEqual(warnings[0]['error'], 'EmptyMemberName')
+
+    def test_resume_allows_collector_fix_but_rejects_parser_or_input_changes(self):
+        collector = str(Path(c.__file__))
+        old = dict(input_sha256={collector:'old', 'parser.py':'same', 'cache.json':'same'},
+                   feature_names=['a'], sample_sha256=['a'*64])
+        new = dict(old, input_sha256={collector:'new', 'parser.py':'same', 'cache.json':'same'})
+        c.verify_resume_identity(old,new)
+        for path in ('parser.py', 'cache.json'):
+            bad = dict(new, input_sha256=dict(new['input_sha256'], **{path:'changed'}))
+            with self.assertRaisesRegex(ValueError, 'parser changed'):
+                c.verify_resume_identity(old,bad)
+
     def test_sections_pe32_and_pe32plus(self):
         for plus in (False, True):
             actual, status = values(pe(plus))
