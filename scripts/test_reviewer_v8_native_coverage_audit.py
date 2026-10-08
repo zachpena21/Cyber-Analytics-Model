@@ -80,6 +80,14 @@ class AuditTests(unittest.TestCase):
                     self.assertTrue({x['sha256'] for x in profile['nearest_native_fit']}<=eligible)
                     self.assertEqual(set(profile['per_seed_tree_changes']),set(map(str,n.s.SEEDS)))
                 self.assertEqual(before,{p:a.cache.digest(p) for p in before})
+                # Full repair-mode replay must recover a damaged checkpoint
+                # score byte-for-byte without changing its completion marker.
+                import repair_reviewer_v8_native_scores as repair
+                damaged=source/'seed-8707/structural_control/prior_only/development-scores.json'
+                contents=damaged.read_bytes();marker=damaged.parents[2]/'completion.json'
+                marker_hash=a.cache.digest(marker);damaged.write_bytes(b'')
+                with patch.object(a.r.g,'fit_model',side_effect=AssertionError('Repair must not train')):repair.run(settings)
+                self.assertEqual(damaged.read_bytes(),contents);self.assertEqual(a.cache.digest(marker),marker_hash)
                 # An unbound ensemble JSON file can be empty even when all
                 # completed seed artifacts remain valid; preflight names it.
                 path=source/'ensemble/plus_imports/targeted_fit_added/development-scores.json'
