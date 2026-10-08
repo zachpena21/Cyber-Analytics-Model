@@ -14,6 +14,18 @@ from test_reviewer_v8_grouped_experiment import NAMES
 
 
 class AuditTests(unittest.TestCase):
+    def test_json_error_identifies_file_and_reader_is_restored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'empty.json';path.write_text('')
+            original=a.cache.read
+            with self.assertRaisesRegex(ValueError,r'Cannot parse JSON: .*empty.json \(0 bytes\)'):
+                with a.named_json_reads():a.cache.read(path)
+            self.assertIs(a.cache.read,original)
+            path.write_text('{invalid')
+            with self.assertRaisesRegex(ValueError,r'Cannot parse JSON: .*empty.json \(8 bytes\)'):
+                with a.named_json_reads():a.cache.read(path)
+            self.assertIs(a.cache.read,original)
+
     def test_label_aware_changes(self):
         entries={str(i):dict(record=dict(label=label)) for i,label in enumerate((1,1,0,0,1))}
         before={str(i):dict(software_prediction=value) for i,value in enumerate((1,0,1,0,1))}
@@ -40,6 +52,8 @@ class AuditTests(unittest.TestCase):
             args=SimpleNamespace(root=root,run=base,native_cache=root/'native',structural_bundle=root/'frozen',output=source,resume=None,audit_only=False)
             with patch.object(n.baseline_loader,'load_baseline',return_value=loaded),patch.object(n.t,'load_inputs',return_value=native_input),patch.object(n,'load_previous_models',side_effect=lambda *args:(copy.deepcopy(previous),references)):
                 with a.recovery.checked_scorer():n.run(args)
+                with a.named_json_reads(),patch.object(a.r.g,'fit_model',side_effect=AssertionError('Preflight must not train')):
+                    self.assertEqual(a.check_saved_json(source),source)
                 before={str(p):a.cache.digest(p) for folder in (source,base,original) for p in folder.rglob('*') if p.is_file()}
                 settings=SimpleNamespace(root=root,run=source,structural_bundle=root/'frozen',output=out)
                 with patch.object(a.r.g,'fit_model',side_effect=AssertionError('Audit must not train')):a.run(settings)
@@ -66,6 +80,12 @@ class AuditTests(unittest.TestCase):
                     self.assertTrue({x['sha256'] for x in profile['nearest_native_fit']}<=eligible)
                     self.assertEqual(set(profile['per_seed_tree_changes']),set(map(str,n.s.SEEDS)))
                 self.assertEqual(before,{p:a.cache.digest(p) for p in before})
+                # An unbound ensemble JSON file can be empty even when all
+                # completed seed artifacts remain valid; preflight names it.
+                path=source/'ensemble/plus_imports/targeted_fit_added/development-scores.json'
+                contents=path.read_text();path.write_text('')
+                with self.assertRaisesRegex(ValueError,'Cannot parse JSON: .*development-scores.json'),a.named_json_reads():a.check_saved_json(source)
+                path.write_text(contents)
                 # Ensemble scores have no seed marker: full saved-score replay
                 # must still reject a changed score even with unchanged gates.
                 path=source/'ensemble/plus_imports/targeted_fit_added/development-scores.json'

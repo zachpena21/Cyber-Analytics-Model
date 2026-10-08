@@ -2,9 +2,13 @@
 """Read-only replay and profiles of native coverage regressions and rescues."""
 import argparse
 from collections import Counter,defaultdict
+from contextlib import contextmanager
 from datetime import datetime,timezone
+import json
 from pathlib import Path
+import sys
 import tempfile
+import traceback
 from types import SimpleNamespace
 
 import numpy as np
@@ -12,6 +16,40 @@ import recover_reviewer_v8_native_coverage as recovery
 
 n=recovery.n
 r,cache=n.r,n.cache
+
+
+@contextmanager
+def named_json_reads():
+    original=cache.read
+    def read(path):
+        try:return original(path)
+        except (json.JSONDecodeError,UnicodeDecodeError) as error:
+            filename=Path(path).resolve()
+            size=filename.stat().st_size if filename.exists() else 'missing'
+            raise ValueError(f'Cannot parse JSON: {filename} ({size} bytes): {error}') from error
+    cache.read=read
+    try:yield
+    finally:cache.read=original
+
+
+def check_saved_json(source):
+    """Check saved JSON and bindings before expensive feature/model replay."""
+    source=source.resolve();identity=cache.read(source/'inputs.json')
+    saved=cache.read(source/'native-coverage-summary.json')
+    if saved.get('complete') is not True:raise ValueError('Need a completed native coverage report')
+    cache.verify_hashes(identity['input_sha256']);paths=set()
+    for seed in n.s.SEEDS:
+        folder=source/f'seed-{seed}';marker=folder/'completion.json';doc=cache.read(marker)
+        if doc.get('complete') is not True or doc.get('seed')!=seed:raise ValueError('Invalid seed completion: '+str(marker))
+        cache.verify_hashes(doc['artifact_sha256'])
+        paths.update(Path(p) for p in doc['artifact_sha256'] if Path(p).suffix=='.json')
+        paths.add(folder/'native-seed-summary.json')
+        paths.update(folder/v/arm/'development-scores.json' for v in n.t.VARIANTS for arm in n.t.ARMS)
+    paths.add(source/'ensemble/native-ensemble-summary.json')
+    paths.update(source/'ensemble'/v/arm/'development-scores.json' for v in n.t.VARIANTS for arm in n.t.ARMS)
+    for path in sorted(paths):cache.read(path)
+    print(f'Saved JSON preflight passed: {len(paths)} files; source: {source}',flush=True)
+    return source
 
 
 def latest(root):
@@ -186,11 +224,18 @@ def run(args):
 def main():
     root=Path(__file__).resolve().parents[1]/'validation-data';ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--run',type=Path,help='Default: newest completed native coverage run')
+    ap.add_argument('--check-json-only',action='store_true',help='Check saved JSON/hashes without feature collection, scoring or fitting')
     ap.add_argument('--structural-bundle',type=Path,default=root/'reviewer-v8-structural-frozen-validation')
     ap.add_argument('--output',type=Path,default=root/('reviewer-v8-native-coverage-audit-'+datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')))
     args=ap.parse_args();args.root=root;args.output=args.output.resolve();args.structural_bundle=args.structural_bundle.resolve()
-    try:run(args)
-    except Exception as error:ap.exit(2,f'V8 native coverage audit stopped: {error}\n')
+    try:
+        with named_json_reads():
+            args.run=check_saved_json(args.run or latest(args.root))
+            if not args.check_json_only:run(args)
+    except Exception as error:
+        traceback.print_exc()
+        print(f'V8 native coverage audit stopped: {error}',file=sys.stderr,flush=True)
+        raise SystemExit(2)
 
 
 if __name__=='__main__':main()

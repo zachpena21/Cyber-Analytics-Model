@@ -12,6 +12,18 @@ The default is the newest completed native coverage run; use `--run PATH` for
 an explicit run. Docker is unnecessary. This command neither trains models nor
 modifies existing experiment files, calibration, splits, or deployment.
 
+For a quick saved-JSON and hash check without feature replay or scoring:
+
+```bash
+./.venv/bin/python scripts/reviewer_v8_native_coverage_audit.py --check-json-only
+```
+
+The full audit also performs this preflight. Parse failures identify the exact
+filename, its byte size, and the full traceback. If preflight passes but the full
+audit fails, retain that traceback: it will distinguish a saved input from a
+temporary replay artifact. Do not delete or replace the reported file before
+the failure is diagnosed.
+
 Input, cache, split and completion hashes are checked. Every saved seed summary,
 held score and decision, plus the equal five-seed ensemble, must reproduce before
 the audit writes a new output directory. The verified recovery array scorer is
