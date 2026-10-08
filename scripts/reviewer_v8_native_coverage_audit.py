@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""Read-only replay and profiles of native coverage regressions and rescues."""
+import argparse
+from collections import Counter,defaultdict
+from datetime import datetime,timezone
+from pathlib import Path
+import tempfile
+from types import SimpleNamespace
+
+import numpy as np
+import recover_reviewer_v8_native_coverage as recovery
+
+n=recovery.n
+r,cache=n.r,n.cache
+
+
+def latest(root):
+    paths=[p.parent for p in root.glob('reviewer-v8-native-coverage-*/native-coverage-summary.json')
+           if cache.read(p).get('complete') is True]
+    if not paths:raise ValueError('No completed native coverage run; pass --run')
+    return max(paths,key=lambda p:((p/'native-coverage-summary.json').stat().st_mtime_ns,str(p)))
+
+
+def load(args):
+    source=(args.run or latest(args.root)).resolve();identity=cache.read(source/'inputs.json')
+    saved=cache.read(source/'native-coverage-summary.json')
+    if saved.get('complete') is not True or saved['completed_seeds']!=list(n.s.SEEDS):raise ValueError('Need all five completed seeds')
+    cache.verify_hashes(identity['input_sha256']);hashes=dict(identity['input_sha256'])
+    base_args=SimpleNamespace(root=args.root,run=Path(identity['source_run']),structural_bundle=args.structural_bundle)
+    entries,names,features,earlier,base_hashes,old,watch,baseline,_,base=n.baseline_loader.load_baseline(base_args)
+    prior=[Path(p).parent for p in base_hashes if Path(p).name=='rich-feature-summary.json']
+    if len(prior)!=1:raise ValueError('Need one original rich cache')
+    extra,extra_names,extra_features,native,bindings=n.t.load_inputs(SimpleNamespace(root=args.root,
+        prior_cache=prior[0],targeted_cache=Path(identity['native_cache']),structural_bundle=args.structural_bundle))
+    if names!=extra_names or native&set(entries):raise ValueError('Native schema/overlap differs')
+    for k in set(extra)-native:
+        if entries.get(k)!=extra[k] or features.get(k)!=extra_features[k]:raise ValueError('Original feature identity differs')
+    entries=dict(entries);features=dict(features)
+    entries.update({k:extra[k] for k in native});features.update({k:extra_features[k] for k in native})
+    manifest,split_audit=n.extend_manifest(entries,names,features,native,old)
+    if manifest is None or manifest!=cache.read(source/'split-manifest.json'):raise ValueError('Preserved split does not reproduce')
+    if split_audit!=cache.read(source/'native-split-audit-summary.json') or cache.read(source/'excluded-sha256.json')!=sorted(entries):
+        raise ValueError('Split audit/exclusions differ')
+    for p,digest in {**base_hashes,**bindings}.items():
+        if hashes.get(p)!=digest:raise ValueError('Native experiment does not bind reproduced inputs: '+p)
+    models,references=n.load_previous_models(base,base_hashes)
+    schemas={variant:schema for variant,(_,schema) in r.matrices(entries,names,features).items()}
+    for seed in n.s.SEEDS:
+        folder=source/f'seed-{seed}';marker=cache.read(folder/'completion.json')
+        if marker.get('complete') is not True or marker['seed']!=seed:raise ValueError('Invalid seed completion')
+        cache.verify_hashes(marker['artifact_sha256']);hashes.update(marker['artifact_sha256'])
+        for variant in n.t.VARIANTS:
+            for f in manifest['folds']:
+                tag=variant+'/targeted_fit_added';path=folder/tag/f'fold-{f["fold"]:02d}-model.json'
+                if marker['artifact_sha256'].get(str(path))!=cache.digest(path):raise ValueError('Unbound candidate model')
+                payload=cache.read(path)
+                if payload.get('development_only') is not True or payload['feature_names']!=schemas[variant]:
+                    raise ValueError('Candidate model/schema differs')
+                seed_report=saved['per_seed'][list(n.s.SEEDS).index(seed)]
+                threshold=next(x['calibration']['threshold'] for x in seed_report['arms'][tag]['folds'] if x['fold']==f['fold'])
+                if abs(payload['reviewer_threshold']-threshold)>1e-9:raise ValueError('Candidate threshold differs')
+                models[seed][(tag,f['fold'])]=payload
+        path=folder/'completion.json';hashes[str(path)]=cache.digest(path)
+    for name in ('inputs.json','native-coverage-summary.json','split-manifest.json','native-split-audit-summary.json','excluded-sha256.json'):
+        path=source/name;hashes[str(path)]=cache.digest(path)
+    lookups={}
+    with tempfile.TemporaryDirectory() as tmp:
+        temporary=Path(tmp)
+        for seed in n.s.SEEDS:
+            print(f'Auditing saved seed {seed}; no fits...',flush=True)
+            folder=temporary/f'seed-{seed}'
+            rebuilt=n.e.ensemble(entries,names,features,native,manifest,{k:models[seed] for k in n.s.SEEDS},watch,folder)
+            rebuilt.update(complete=True,seeds=[seed],weights=[1.],seed=seed,arm_meaning=n.ARM_MEANING,
+                previous_control_max_abs=n.verify_previous(folder,references[seed]),
+                populations=n.populations(folder,entries,earlier,native,manifest['groups']),
+                export_parity=cache.read(source/f'seed-{seed}/completion.json')['export_parity'])
+            if rebuilt!=saved['per_seed'][list(n.s.SEEDS).index(seed)] or rebuilt!=cache.read(source/f'seed-{seed}/native-seed-summary.json'):
+                raise ValueError('Saved seed summary does not reproduce')
+            verify_scores(folder,source/f'seed-{seed}',hashes)
+        folder=temporary/'ensemble'
+        rebuilt=n.e.ensemble(entries,names,features,native,manifest,models,watch,folder)
+        before={v:{x['sha256']:x for x in cache.read(base/v/'targeted_fit_added/development-scores.json')} for v in n.t.VARIANTS}
+        rebuilt.update(complete=True,arm_meaning=n.ARM_MEANING,previous_control_max_abs=n.verify_previous(folder,before),
+            populations=n.populations(folder,entries,earlier,native,manifest['groups']))
+        if rebuilt!=saved['ensemble'] or rebuilt!=cache.read(source/'ensemble/native-ensemble-summary.json'):
+            raise ValueError('Saved ensemble does not reproduce')
+        verify_scores(folder,source/'ensemble',hashes)
+        for tag in rebuilt['arms']:lookups[tag]={x['sha256']:x for x in cache.read(folder/tag/'development-scores.json')}
+    if saved['original_study_reference']!=baseline:raise ValueError('Original reference differs')
+    for section,value in (('sample_count',len(entries)),('earlier_targeted_count',len(earlier)),('native_count',len(native)),('arm_meaning',n.ARM_MEANING)):
+        if saved[section]!=value:raise ValueError('Saved population/arm identity differs')
+    if any(saved.get(k) is not False for k in ('independent_validation','deployment_changed','final_refit','seed_selection','split_search','held_threshold_search')):
+        raise ValueError('Saved study role differs')
+    path=source/'ensemble/native-ensemble-summary.json';hashes[str(path)]=cache.digest(path)
+    return source,entries,names,features,earlier,native,manifest,models,lookups,saved,watch,hashes
+
+
+def verify_scores(rebuilt,source,hashes):
+    for variant in n.t.VARIANTS:
+        for arm in n.t.ARMS:
+            relative=Path(variant)/arm/'development-scores.json';path=source/relative
+            if cache.read(rebuilt/relative)!=cache.read(path):raise ValueError('Saved held scores/decisions do not reproduce: '+str(path))
+            hashes[str(path)]=cache.digest(path)
+
+
+def change_sets(entries,before,after,policy):
+    result={name:[] for name in ('malware_regressed','malware_rescued','benign_rescued','benign_regressed')}
+    for k in sorted(entries):
+        b=before[k][policy+'_prediction'];a=after[k][policy+'_prediction'];label=entries[k]['record']['label']
+        if a!=b:result[('malware_' if label else 'benign_')+('rescued' if a==label else 'regressed')].append(k)
+    return result
+
+
+def describe(shas,entries,groups,X,index,schema):
+    bins=defaultdict(list)
+    for k in shas:bins[groups[k]].append(k)
+    cohorts=Counter(r.g.software_group(entries[k]) or 'unidentified' for k in shas)
+    libraries=Counter(lib for k in shas for lib in set(r.g.libraries(entries[k])))
+    return dict(sample_count=len(shas),representation_group_count=len(bins),cohorts=dict(cohorts),
+        libraries=dict(libraries.most_common()),
+        features={name:dict(sample_median=float(np.median(X[[index[k] for k in shas],j])),
+            equal_group_median=float(np.median([np.median(X[[index[k] for k in ids],j]) for ids in bins.values()])))
+            for j,name in enumerate(schema)} if shas else {})
+
+
+def analyze(entries,names,features,earlier,native,manifest,models,lookups,saved,watch):
+    keys=sorted(entries);index={k:i for i,k in enumerate(keys)};groups=manifest['groups']
+    matrices=r.matrices(entries,names,features);X,schema=matrices['plus_imports']
+    profileX,profileSchema=matrices['plus_all']
+    before=lookups['plus_imports/prior_only'];after=lookups['plus_imports/targeted_fit_added']
+    changes={p:change_sets(entries,before,after,p) for p in n.t.POLICIES};folds=[];scales={}
+    for fold in manifest['folds']:
+        f=fold['fold'];shas=fold['held'];rows=[entries[k]['record'] for k in shas]
+        bt=next(x['calibration']['threshold'] for x in saved['ensemble']['arms']['plus_imports/prior_only']['folds'] if x['fold']==f)
+        at=next(x['calibration']['threshold'] for x in saved['ensemble']['arms']['plus_imports/targeted_fit_added']['folds'] if x['fold']==f)
+        bp=np.asarray([before[k]['reviewer_score'] for k in shas]);ap=np.asarray([after[k]['reviewer_score'] for k in shas])
+        fit=X[[index[k] for k in fold['prior_fit']]];q=np.percentile(fit,[25,75],axis=0)
+        scales[f]=np.where(q[1]-q[0]>1e-9,q[1]-q[0],1.)
+        folds.append(dict(fold=f,threshold_before=bt,threshold_after=at,native_fit_sha256=sorted(set(fold['expanded_fit'])&native),
+            changes={p:{name:sorted(set(ids)&set(shas)) for name,ids in sets.items()} for p,sets in changes.items()},
+            descriptive_threshold_swap={label:r.g.f.w.metrics(rows,r.g.gated(rows,prob,thr)) for label,prob,thr in
+                (('old_scores_old_threshold',bp,bt),('old_scores_new_threshold',bp,at),('new_scores_old_threshold',ap,bt),('new_scores_new_threshold',ap,at))}))
+    watched={group:shas for group,shas in watch.items() if len(shas)==76}
+    # All changed samples under either policy, plus one representative of each
+    # watched 76-row group. Distances use only native fit rows in the same fold.
+    targets=set(k for sets in changes.values() for shas in sets.values() for k in shas)
+    targets.update(min(shas) for shas in watched.values());profiles=[]
+    for k in sorted(targets):
+        f=before[k]['fold'];details=next(x for x in folds if x['fold']==f)
+        vector=X[index[k]];eligible=details['native_fit_sha256']
+        nearest=sorted(eligible,key=lambda a:(float(np.mean(abs((vector-X[index[a]])/scales[f]))),a))[:3]
+        profiles.append(dict(sha256=k,label=entries[k]['record']['label'],source=entries[k]['record']['source'],fold=f,group=groups[k],
+            population='native' if k in native else 'earlier_targeted' if k in earlier else 'original',
+            libraries=r.g.libraries(entries[k]),provenance=entries[k].get('provenance'),
+            features=dict(zip(schema,map(float,vector))),before=before[k],after=after[k],
+            rich_static_features=dict(zip(r.rich.FEATURE_NAMES,features[k]['values'])),
+            score_change=after[k]['reviewer_score']-before[k]['reviewer_score'],
+            margin_before=before[k]['reviewer_score']-details['threshold_before'],margin_after=after[k]['reviewer_score']-details['threshold_after'],
+            nearest_native_fit=[dict(sha256=a,source=entries[a]['record']['source'],libraries=r.g.libraries(entries[a]),
+                distance=float(np.mean(abs((vector-X[index[a]])/scales[f]))),
+                differing_features=[dict(feature=schema[j],sample_value=float(vector[j]),native_value=float(X[index[a],j])) for j in np.flatnonzero(vector!=X[index[a]])]) for a in nearest],
+            per_seed_tree_changes={str(seed):n.audit.tree_changes(models[seed][('plus_imports/prior_only',f)],
+                models[seed][('plus_imports/targeted_fit_added',f)],vector,limit=3) for seed in n.s.SEEDS}))
+    cohorts={name:describe(shas,entries,groups,profileX,index,profileSchema) for name,shas in changes['software'].items()}
+    cohorts['all_native']=describe(sorted(native),entries,groups,profileX,index,profileSchema)
+    return dict(changes=changes,change_counts={p:{name:len(ids) for name,ids in sets.items()} for p,sets in changes.items()},
+        folds=folds,cohort_profiles=cohorts,profiles=profiles,
+        watch_groups=saved['ensemble']['watch_groups'],
+        scope='Descriptive inspected-development audit. Threshold swaps are diagnostics, not policy candidates. Fit-only IQR scales; unit scale for constant features. Nearest matches and tree path changes describe similarities, not causal explanations. Per-seed raw tree contributions do not sum to an ensemble probability change.')
+
+
+def run(args):
+    with recovery.checked_scorer():loaded=load(args)
+    source,entries,names,features,earlier,native,manifest,models,lookups,saved,watch,hashes=loaded
+    result=analyze(entries,names,features,earlier,native,manifest,models,lookups,saved,watch)
+    for module in (recovery,n,n.e,n.s,n.t,r,cache,n.audit):hashes[str(Path(module.__file__).resolve())]=cache.digest(module.__file__)
+    hashes[str(Path(__file__).resolve())]=cache.digest(__file__)
+    cache.verify_hashes(hashes);r.g.f.fresh_output(args.output)
+    cache.dump(args.output/'inputs.json',dict(source_run=str(source),input_sha256=hashes,training=False))
+    report=dict(complete=True,training=False,threshold_tuning=False,independent_validation=False,deployment_changed=False,
+        source_run=str(source),sample_count=len(entries),replayed_seeds=list(n.s.SEEDS),analysis=result)
+    cache.verify_hashes(hashes);cache.dump(args.output/'native-coverage-audit-summary.json',report)
+    print(f'Complete: {args.output}\nSend native-coverage-audit-summary.json.',flush=True)
+
+
+def main():
+    root=Path(__file__).resolve().parents[1]/'validation-data';ap=argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--run',type=Path,help='Default: newest completed native coverage run')
+    ap.add_argument('--structural-bundle',type=Path,default=root/'reviewer-v8-structural-frozen-validation')
+    ap.add_argument('--output',type=Path,default=root/('reviewer-v8-native-coverage-audit-'+datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')))
+    args=ap.parse_args();args.root=root;args.output=args.output.resolve();args.structural_bundle=args.structural_bundle.resolve()
+    try:run(args)
+    except Exception as error:ap.exit(2,f'V8 native coverage audit stopped: {error}\n')
+
+
+if __name__=='__main__':main()
