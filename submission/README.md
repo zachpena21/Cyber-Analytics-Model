@@ -1,5 +1,10 @@
 # Final v8 container preparation
 
+The uploaded Windows preflight passed on October 13: clean build 67.79 seconds,
+restricted startup 3.47 seconds, and exact raw-PE parity for all 16 System32
+smoke samples (maximum error zero). This verifies that cohort only; the bounded
+benign/malware check below and final package review remain pending.
+
 The final reviewer weights are tracked at
 `defender/defender/models/boundary_reviewer_v8_final/`. All previous candidates
 remain in the repository. Its exported scores/decisions reproduced all 13,245
@@ -70,4 +75,24 @@ This follows the upstream `src/PE/Binary.cpp` and `src/PE/Parser.cpp` at those
 release tags. The frozen reference extractor and all model weights remain
 unchanged. Raw-PE parity still must pass; this compatibility layer does not
 establish equivalence on every malformed PE.
+
+## Bounded VM archive regression
+
+Keep both diagnostic services running on the Windows host. From the VM repo root:
+
+```bash
+git pull --ff-only origin main
+./.venv/bin/python scripts/check_reviewer_v8_batch_runtime.py \
+  --reference http://WINDOWS_HOST:8082 --candidate http://WINDOWS_HOST:8083
+```
+
+Replace `WINDOWS_HOST` with the reachable host address. Defaults select 64 unique
+eligible PEs from each existing `validation-data/benign-final-6.zip` and
+`validation-data/malwarebazaar-v7-final-20260925`; override `--benign`/`--malware`
+if needed. Existing pyzipper handles the encrypted archives. Members stay in
+memory and are never executed or extracted. Each scored sample is checkpointed
+to `validation-data/v8-batch-runtime-parity-summary.json`; archive warnings and
+insufficient eligible coverage are reported rather than counted as a pass.
+This is runtime regression evidence on reused data, not a new accuracy estimate.
+The HTTP timings include network and diagnostic overhead.
 
