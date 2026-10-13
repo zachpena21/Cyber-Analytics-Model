@@ -6,7 +6,11 @@ smoke samples (maximum error zero). After restoring the legacy 300-byte named
 export limit, the uploaded bounded check passed on all 64 benign and 64 malware
 samples with no changed features or decisions (maximum score error 2.22e-16).
 Sanitized evidence is in `runtime-validation.json`. These checks verify the
-supplied cohorts only; final package and base-image review remain pending.
+supplied cohorts only. The final ZIP passed every manifest hash and contains
+one root Dockerfile and inference inputs only. Final measured build/startup
+times were 50.03/2.39 seconds; process peak RSS was approximately 553 MiB with
+no recorded OOM kill. `package-validation.json` records the artifact identity.
+An exact platform-approved base-image pin remains unconfirmed.
 
 The final reviewer weights are tracked at
 `defender/defender/models/boundary_reviewer_v8_final/`. All previous candidates

@@ -1,0 +1,60 @@
+{
+  "complete": true,
+  "zip_name": "reviewer-v8-submission.zip",
+  "zip_sha256": "0205b5eefae26075e3d8d12c6987647c9dc594d693734ebbffce5defe52f26a2",
+  "zip_bytes": 116304834,
+  "image_id": "sha256:f80f82de0fbe9297183561702163802883ab6a52bf1644a4cfee2c7f2c09e425",
+  "model_sha256": "6dbe19e2f0962b4797ee5f58e17a37511b16dae94385253394e8f1add1df78be",
+  "dockerfile_count": 1,
+  "contains_samples": false,
+  "raw_pe_regression": {
+    "complete": true,
+    "passed": true,
+    "kind": "bounded_raw_pe_runtime_regression",
+    "counts": {
+      "benign": 64,
+      "malware": 64
+    },
+    "sample_count": 128,
+    "max_abs_error": 2.220446049250313e-16,
+    "decision_mismatches": 0,
+    "feature_mismatches": 0,
+    "archive_warning_count": 0,
+    "candidate_http_latency_seconds": {
+      "max": 1.2911540589998367,
+      "p95": 0.557476159000089
+    },
+    "report_sha256": "c8659ac545e71e389f6132e9a368ba0d383f930bd9a0efe8bf8e9c564583a296",
+    "model_sha256": "6dbe19e2f0962b4797ee5f58e17a37511b16dae94385253394e8f1add1df78be",
+    "route_min": 0.15,
+    "reviewer_threshold": 0.6882517225516912,
+    "training": false,
+    "scope": "Deterministic bounded runtime regression cohort from existing data, not independent accuracy validation. HTTP timings include VM network and diagnostic serialization."
+  },
+  "resources": {
+    "process": {
+      "VmHWM": "565764 kB",
+      "VmRSS": "454640 kB"
+    },
+    "cgroup_peak_bytes": 308088832,
+    "image_id": "sha256:f80f82de0fbe9297183561702163802883ab6a52bf1644a4cfee2c7f2c09e425",
+    "oom_killed": false,
+    "memory_limit_bytes": 1073741824,
+    "nano_cpus": 1000000000,
+    "readonly": true
+  },
+  "clean_build_seconds": 50.0327181,
+  "restricted_startup_seconds": 2.3945197,
+  "diagnostics_disabled": true,
+  "course_base_pin_confirmed": false,
+  "submission_ready": false,
+  "pending": "Review current course base-image requirements against the tested python:3.11-slim template; runtime evidence covers supplied regression samples only.",
+  "independent_zip_checks": {
+    "zip_digest_matches": true,
+    "manifest_files_verified": 29,
+    "zip_entries": 30,
+    "one_root_dockerfile": true,
+    "no_executable_samples_or_pickle": true
+  },
+  "instruction_review": "Supported Python 3.11 slim family and measured runtime/package limits match the supplied screenshot. Exact platform-approved version pins are not listed. Platform certificate injection is temporary build behavior; submitted Dockerfile is unchanged."
+}

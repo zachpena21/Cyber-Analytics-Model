@@ -15,7 +15,7 @@ boundary reviewer. Training and diagnostics run separately from inference.
 | Bounded v8 comparison | Same structural trees plus a constrained upstream-score correction; threshold `0.6722878125865038` |
 | Original expanded v8 | Preserved 72-feature reference; calibrated threshold `0.3181019231722836`; fixed comparison threshold `0.6397229919376241` |
 
-**Structural v8 is selected for final packaging; runtime qualification is still pending.** Its bundle
+**Structural v8 is packaged; the supplied runtime regression and resource checks passed.** Its bundle
 lives locally at `validation-data/reviewer-v8-structural-frozen-validation/`.
 The original expanded bundle remains at
 `validation-data/reviewer-v8-frozen-validation/`. Both are ignored by Git.
@@ -36,10 +36,14 @@ export proof are now tracked; all earlier candidates remain intact.
 The [submission preflight](submission/README.md) stages an inference-only
 Python-3.11 context from the existing compact forest/adapter image. It exports
 preprocessing parameters without loading an old sklearn pickle in the new
-runtime. Restricted startup and real-PE comparisons must pass before packaging.
+runtime. Restricted startup and real-PE comparisons passed before packaging:
+64 benign plus 64 malware samples had no feature or decision mismatches.
 The original Dockerfile and frozen experiment dependencies remain unchanged.
 Neither the weights ZIP nor the whole research repository is the final submission
 ZIP; the generated context has exactly one Dockerfile and all required inputs.
+The completed `reviewer-v8-submission.zip` is 116,304,834 bytes; its SHA-256 is
+`0205b5eefae26075e3d8d12c6987647c9dc594d693734ebbffce5defe52f26a2`.
+See [package evidence](submission/package-validation.json) for measured limits.
 
 Later native-coverage imports development reduced benign errors but detected
 290/481 malware versus 307/481 in its matched earlier-coverage control. It lost
@@ -236,12 +240,13 @@ Never execute samples or commit samples, acquisition credentials or local report
 Source labels are inherited from their publishers/providers, not independently
 verified ground truth.
 
-## Submission compatibility: work still required
+## Submission package and compatibility
 
 The October 6 update cancels the online platform and moves submission to Canvas.
 Submit the same defense content through a hosted ZIP link, a GitHub repository
 with grader access, or Docker Hub. Grading will use a local version of the platform.
-No final release or submission has been made.
+The final ZIP was generated and independently checked against every manifest
+hash. No external submission or hosted release has been made.
 
 The supplied October 5 instructions require exactly one Dockerfile of at most
 100 KiB in the ZIP, with required COPY inputs inside its containing build context.
@@ -251,15 +256,23 @@ no runtime network, 1 CPU and 1 GiB RAM.
 
 **The reference Dockerfile uses Python 3.9 and legacy dependencies.** A separate
 Python-3.11 submission template and parameter-only preprocessing runtime are now
-available, but actual container parity/resource qualification is still pending.
+available and passed the supplied runtime checks. The final clean build took
+50.03 seconds, restricted startup 2.39 seconds, and process peak RSS was about
+553 MiB with no recorded OOM kill under the 1 GiB limit. The 128-sample raw-PE
+comparison had no changed features or decisions; maximum numerical error was
+2.22e-16. These are bounded migration regression checks, not hidden evaluation.
 Changing dependencies without validating extracted features can change model
 scores. The Canvas update does not explicitly change the previous runtime restrictions.
 Confirm any revised approved image pins and runtime rules with the course's
-published instructions before packaging the final defense.
+published instructions before submitting the final defense. The screenshot
+describes temporary platform certificate injection without altering the submitted
+Dockerfile. The tested ZIP keeps TLS verification enabled and uses the supported
+`python:3.11-slim` image family; an exact platform-approved pin is not specified
+in the supplied instructions and remains unconfirmed.
 
-Before submission: migrate and parity-check the approved runtime, package only
-inference inputs, disable diagnostics, and measure clean build time, startup,
-memory and latency under the stated restrictions. No platform qualification or
+The ZIP packages only inference inputs, disables diagnostics by default, and
+contains exactly one root Dockerfile. Submit the generated ZIP, rather than the
+whole research repository or the weights-only ZIP. No platform qualification or
 hidden evaluation result has been obtained.
 
 ## Historical references
