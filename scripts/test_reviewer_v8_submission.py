@@ -64,6 +64,17 @@ class SubmissionTests(unittest.TestCase):
         result=legacy_text_features(binary,bytes(raw))
         self.assertEqual(result,dict(libraries='normal.dll',functions='Regular ResolvedOrdinal',
             exports_list='PublicName LastAlias unnamed.Target',exports=3))
+        struct.pack_into('<I',raw,280,4);struct.pack_into('<I',raw,332,500);struct.pack_into('<H',raw,346,2)
+        raw[500:802]=b'X'*301+b'\0'
+        result=legacy_text_features(binary,bytes(raw))
+        self.assertEqual(result['exports'],2)
+        self.assertEqual(result['exports_list'],'PublicName LastAlias')
+        raw[800]=0
+        self.assertEqual(legacy_text_features(binary,bytes(raw))['exports'],3)
+        # A short alias cannot undo the old parser's corrupted-ordinal marker.
+        raw[800]=ord('X');struct.pack_into('<I',raw,280,5)
+        struct.pack_into('<I',raw,336,400);struct.pack_into('<H',raw,348,2)
+        self.assertEqual(legacy_text_features(binary,bytes(raw))['exports'],2)
         binary.has_imports=False;binary.has_exports=False
         self.assertEqual(legacy_text_features(binary,b''),dict(libraries='',functions='',exports_list='',exports=0))
         binary.has_exports=True

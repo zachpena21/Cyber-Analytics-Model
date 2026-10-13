@@ -70,7 +70,8 @@ address for both services and local benign/malware files via `--files`:
 
 The submission-only extractor restores two LIEF 0.11.5 text conventions on
 the pinned LIEF 0.13.2 parser: delay imports are excluded from imported-library
-and function text, and named forwarded exports use the export-name table.
+and function text, named forwarded exports use the export-name table, and
+named exports exceeding the old 300-byte limit are excluded by ordinal.
 This follows the upstream `src/PE/Binary.cpp` and `src/PE/Parser.cpp` at those
 release tags. The frozen reference extractor and all model weights remain
 unchanged. Raw-PE parity still must pass; this compatibility layer does not
@@ -87,9 +88,10 @@ git pull --ff-only origin main
 ```
 
 Replace `WINDOWS_HOST` with the reachable host address. Defaults select 64 unique
-eligible PEs from each existing `validation-data/benign-final-6.zip` and
-`validation-data/malwarebazaar-v7-final-20260925`; override `--benign`/`--malware`
-if needed. Existing pyzipper handles the encrypted archives. Members stay in
+eligible PEs from `validation-data/benign-final-6.zip` and across sorted existing
+`validation-data/malwarebazaar*-final-*` batches; override `--benign` or pass one
+or more paths with `--malware` if needed. SHAs are deduplicated across batches.
+Existing pyzipper handles the encrypted archives. Members stay in
 memory and are never executed or extracted. Each scored sample is checkpointed
 to `validation-data/v8-batch-runtime-parity-summary.json`; archive warnings and
 insufficient eligible coverage are reported rather than counted as a pass.

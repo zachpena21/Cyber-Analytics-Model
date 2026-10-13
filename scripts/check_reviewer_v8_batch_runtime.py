@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import io
+import itertools
 import json
 from pathlib import Path
 import time
@@ -54,12 +55,15 @@ def run(args):
             or new_info.get('reviewer_threshold')!=model['reviewer_threshold']):
         raise ValueError('Candidate routing/threshold differs')
     counts={};timings=[]
+    malware_paths=args.malware or sorted(Path(__file__).resolve().parents[1].joinpath('validation-data').glob('malwarebazaar*-final-*'))
+    if not malware_paths:raise ValueError('No existing MalwareBazaar batches found; pass --malware with paths')
+    sources={'benign':[args.benign],'malware':malware_paths}
     args.output.parent.mkdir(parents=True,exist_ok=True)
     def save(complete):
         ordered=sorted(timings)
         report=dict(complete=complete,passed=complete and all(row['pass_'] for row in rows)
                     and all(n==args.limit for n in counts.values()) and len(counts)==2,
-            per_class_target=args.limit,counts=counts,sample_count=len(rows),
+            per_class_target=args.limit,counts=counts,sample_count=len(rows),source_paths={role:list(map(str,paths)) for role,paths in sources.items()},
             max_abs_error=max((row['max_abs_error'] for row in rows),default=0.),
             candidate_http_latency_seconds=dict(max=max(ordered,default=0.),
                 p95=ordered[min(len(ordered)-1,int(.95*len(ordered)))] if ordered else 0.),
@@ -68,10 +72,12 @@ def run(args):
         temporary=args.output.with_suffix('.tmp');temporary.write_text(json.dumps(report,indent=2)+'\n');temporary.replace(args.output)
         return report
     try:
-        for role,path in [('benign',args.benign),('malware',args.malware)]:
-            if not path.exists():raise FileNotFoundError(path)
+        for role,paths in sources.items():
+            for path in paths:
+                if not path.exists():raise FileNotFoundError(path)
             counts[role]=0
-            for origin,raw in payloads(path,pyzipper.AESZipFile,warnings):
+            streams=(payloads(path,pyzipper.AESZipFile,warnings) for path in paths)
+            for origin,raw in itertools.chain.from_iterable(streams):
                 sha=hashlib.sha256(raw).hexdigest()
                 if sha in seen:continue
                 seen.add(sha)
@@ -100,7 +106,7 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--reference',required=True);ap.add_argument('--candidate',required=True)
     ap.add_argument('--benign',type=Path,default=root/'validation-data/benign-final-6.zip')
-    ap.add_argument('--malware',type=Path,default=root/'validation-data/malwarebazaar-v7-final-20260925')
+    ap.add_argument('--malware',type=Path,nargs='+',help='Existing batch paths; defaults to sorted validation-data/malwarebazaar*-final-*')
     ap.add_argument('--model',type=Path,default=root/'defender/defender/models/boundary_reviewer_v8_final/model.json')
     ap.add_argument('--limit',type=int,default=64);ap.add_argument('--output',type=Path,default=root/'validation-data/v8-batch-runtime-parity-summary.json')
     args=ap.parse_args()

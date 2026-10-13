@@ -31,15 +31,21 @@ def legacy_text_features(binary, raw):
         if count>1048576:raise ValueError('Export name table too large')
         name_table=binary.rva_to_offset(struct.unpack_from('<I',raw,table+32)[0])
         ordinal_table=binary.rva_to_offset(struct.unpack_from('<I',raw,table+36)[0])
-        overrides={}
+        overrides={};corrupted=set()
         for i in range(count):
             ordinal=struct.unpack_from('<H',raw,ordinal_table+2*i)[0]+base
             offset=binary.rva_to_offset(struct.unpack_from('<I',raw,name_table+4*i)[0])
             if offset<0 or offset>=len(raw):raise ValueError('Export name offset out of bounds')
             end=raw.find(b'\0',offset)
             if end<0:raise ValueError('Unterminated export name')
-            overrides[ordinal]=raw[offset:end].decode('utf-8')
+            name_bytes=raw[offset:end]
+            # LIEF 0.11.5 Parser.cpp: MAX_EXPORT_NAME_SIZE = 300. A
+            # too-long named export marks its ordinal corrupted permanently,
+            # including when a later alias supplies a shorter name.
+            if len(name_bytes)>300:corrupted.add(ordinal)
+            overrides[ordinal]=name_bytes.decode('utf-8')
         for entry in binary.get_export().entries:
+            if entry.ordinal in corrupted:continue
             name=overrides.get(entry.ordinal,entry.name)
             if name:names.append(name)
     return dict(libraries=libraries,functions=functions,exports_list=' '.join(names),exports=len(names))
