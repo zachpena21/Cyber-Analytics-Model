@@ -4,23 +4,39 @@ A PE malware classifier for the course black-box defense project. The runtime
 combines a compact legacy random forest, a modern linear adapter, and an optional
 boundary reviewer. Training and diagnostics run separately from inference.
 
-## Current model status — October 6, 2026
+## Current model status — October 13, 2026
 
 | Component | Current state |
 |---|---|
 | Compact legacy forest | Existing runtime base; benign threshold `0.510001` |
 | Modern adapter | Existing coefficients; malware threshold `0.70`; signature-adjusted base verdict is an input |
 | Reviewer v7 | Latest tracked runtime reference: `boundary_reviewer_v7_gbdt_candidate`; 66 features, 128 gradient-boosting trees; route `0.15`, threshold `0.6312998096487621` |
-| Structural v8 | Current primary research candidate; 66 structural/import features; fixed provenance fold 0 with software calibration; route `0.15`, threshold `0.6882517225516912` |
+| Structural v8 | Selected final reviewer weights; unchanged frozen provenance fold 0; 66 structural/import inputs; route `0.15`, threshold `0.6882517225516912` |
 | Bounded v8 comparison | Same structural trees plus a constrained upstream-score correction; threshold `0.6722878125865038` |
 | Original expanded v8 | Preserved 72-feature reference; calibrated threshold `0.3181019231722836`; fixed comparison threshold `0.6397229919376241` |
 
-**Structural v8 is an offline candidate, not a deployed replacement.** Its bundle
+**Structural v8 is selected for final packaging; runtime qualification is still pending.** Its bundle
 lives locally at `validation-data/reviewer-v8-structural-frozen-validation/`.
 The original expanded bundle remains at
 `validation-data/reviewer-v8-frozen-validation/`. Both are ignored by Git.
 The default Docker configuration loads the adapter and leaves the reviewer
 disabled; v7 must be explicitly enabled and selected as shown below.
+
+The [final selection record](docs/reviewer-v8-final-selection.md) retains every
+candidate and closes model experimentation for submission preparation. The
+[finalization workflow](scripts/finalize_reviewer_v8.md) exports the exact frozen
+structural weights into the existing runtime format, checks bit-for-bit cached
+score/decision parity, and creates a model ZIP for committing and packaging.
+The exported runtime vector has 72 fields; its first six upstream fields are
+unused, leaving the same 66 structural inputs. No refit or threshold change is
+selected. The model ZIP alone is not the Docker submission package.
+
+Later native-coverage imports development reduced benign errors but detected
+290/481 malware versus 307/481 in its matched earlier-coverage control. It lost
+20 previously detected malware samples and rescued three; the 76-sample watch
+group remained missed. Those weights, the earlier richer ensembles, and the
+group-weighting experiment remain research references. Their inspected
+development results do not supersede the frozen structural choice.
 
 The adapter supplies the routing gate. Routed samples use the reviewer decision;
 samples below the route minimum retain the adapter decision. Structural v8 removes
@@ -189,15 +205,15 @@ On the VM, after fresh collection:
 ```bash
 ./.venv/bin/python scripts/reviewer_v8_structural_validation.py evaluate \
   --sources validation-data/reviewer-v8-structural-fresh-acquisition/sources.json \
-  --service-url http://192.168.1.193:8082/
+  --service-url http://WINDOWS_HOST:8082/
 ```
 
-Substitute the Windows host IP if different. For diagnostics of a completed run:
+Replace `WINDOWS_HOST` with the Windows host IP. For diagnostics of a completed run:
 
 ```bash
 ./.venv/bin/python scripts/test_reviewer_v8_structural_feature_diagnostics.py
 ./.venv/bin/python scripts/reviewer_v8_structural_feature_diagnostics.py \
-  --service-url http://192.168.1.193:8082/
+  --service-url http://WINDOWS_HOST:8082/
 ```
 
 The diagnostic selects the latest completed evaluation matching the exact
@@ -243,5 +259,6 @@ development batches and are not the current model status.
 
 Upstream base:
 [2021 Machine Learning Security Evasion Competition](https://github.com/fabriciojoc/2021-Machine-Learning-Security-Evasion-Competition).
+
 
 

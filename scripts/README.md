@@ -3,6 +3,13 @@
 For model status and measured results, start with the [repository README](../README.md).
 Run commands from the repository root; generated data stays in `validation-data/`.
 
+## Final reviewer v8 preparation
+
+[Finalize reviewer v8](finalize_reviewer_v8.md) exports the unchanged frozen
+structural primary into the existing runtime format, checks exact cached-vector
+parity and inventories retained candidates. See the [selection record](../docs/reviewer-v8-final-selection.md).
+Docker runtime qualification remains separate from this weights export.
+
 ## Current structural v8 workflow
 
 | Tool | Purpose |
