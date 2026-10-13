@@ -34,10 +34,20 @@ try {
         "/repo/scripts/prepare_reviewer_v8_submission.py", "--repo", "/repo", "--artifacts", "/work/artifacts", "--output", "/work/context")
     $context = Join-Path $work "context"
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
-    $build = Start-Process -FilePath "docker" -ArgumentList @("build", "--pull", "--no-cache", "-t", $Image, ('"' + $context + '"')) -NoNewWindow -PassThru
+    $buildOut = Join-Path $work "docker-build.stdout.log"
+    $buildErr = Join-Path $work "docker-build.stderr.log"
+    Write-Host "Building image (up to 300 seconds). Live build log: $buildErr"
+    $build = Start-Process -FilePath "docker" -ArgumentList @("build", "--pull", "--no-cache", "-t", $Image, ('"' + $context + '"')) -NoNewWindow -PassThru -RedirectStandardOutput $buildOut -RedirectStandardError $buildErr
+    # Retain the native handle before waiting: Windows PowerShell may otherwise
+    # lose access to ExitCode for a process returned by Start-Process.
+    $buildHandle = $build.Handle
     if (-not $build.WaitForExit(300000)) { $build.Kill(); throw "Clean build timed out at 300 seconds" }
-    $build.Refresh()
-    if ($build.ExitCode -ne 0) { throw "Docker build failed with exit code $($build.ExitCode)" }
+    $build.WaitForExit()
+    $buildExitCode = $build.ExitCode
+    if (Test-Path $buildOut) { Get-Content $buildOut | ForEach-Object { Write-Host $_ } }
+    if (Test-Path $buildErr) { Get-Content $buildErr | ForEach-Object { Write-Host $_ } }
+    if ($null -eq $buildExitCode) { throw "Docker exit code unavailable; see docker-build.stdout.log and docker-build.stderr.log in $work" }
+    if ($buildExitCode -ne 0) { throw "Docker build failed with exit code $buildExitCode; see docker-build.stderr.log in $work" }
     $buildSeconds = $clock.Elapsed.TotalSeconds
     if ($buildSeconds -gt 300) { throw "Clean build exceeded 300 seconds: $buildSeconds" }
     $restricted = (Invoke-Docker -Arguments @("run", "-d", "--name", "v8-restricted-$stamp", "--read-only", "--network", "none",
