@@ -1,0 +1,34 @@
+{
+  "name": "Reviewer v8 final: frozen structural primary",
+  "source_model_sha256": "ff433712d7bbd0c84a9275846f88b4b0e4f191223e521d7d56440597ad7a9bb4",
+  "runtime_model_sha256": "6dbe19e2f0962b4797ee5f58e17a37511b16dae94385253394e8f1add1df78be",
+  "route_min": 0.15,
+  "reviewer_threshold": 0.6882517225516912,
+  "structural_feature_count": 66,
+  "runtime_vector_count": 72,
+  "unused_runtime_fields": [
+    "benign_probability",
+    "adapter_probability",
+    "base_trigger_raw",
+    "base_trigger_adjusted",
+    "signature_checked",
+    "signature_verified"
+  ],
+  "tree_count": 128,
+  "selection": {
+    "mode": "provenance",
+    "fold": 0,
+    "policy": "software",
+    "rule": "Fixed provenance fold zero, selected by index rather than held performance; no final refit."
+  },
+  "refit": false,
+  "threshold_tuning": false,
+  "observed_evaluation": {
+    "benign": 526,
+    "false_positives": 2,
+    "malware": 92,
+    "true_positives": 75,
+    "note": "Recorded pre-refinement batch; later inspected as development data. Not a hidden-course estimate."
+  },
+  "candidate_policy": "Retain every historical candidate; final choice is the unchanged structural primary."
+}

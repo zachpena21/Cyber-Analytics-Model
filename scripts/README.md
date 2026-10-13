@@ -10,6 +10,10 @@ structural primary into the existing runtime format, checks exact cached-vector
 parity and inventories retained candidates. See the [selection record](../docs/reviewer-v8-final-selection.md).
 Docker runtime qualification remains separate from this weights export.
 
+The [submission preflight](../submission/README.md) verifies the tracked final
+weights, exports the reference preprocessing pipeline, prepares an inference-only
+Python-3.11 context and checks restricted startup plus raw-PE smoke parity.
+
 ## Current structural v8 workflow
 
 | Tool | Purpose |

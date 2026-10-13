@@ -10,8 +10,8 @@ boundary reviewer. Training and diagnostics run separately from inference.
 |---|---|
 | Compact legacy forest | Existing runtime base; benign threshold `0.510001` |
 | Modern adapter | Existing coefficients; malware threshold `0.70`; signature-adjusted base verdict is an input |
-| Reviewer v7 | Latest tracked runtime reference: `boundary_reviewer_v7_gbdt_candidate`; 66 features, 128 gradient-boosting trees; route `0.15`, threshold `0.6312998096487621` |
-| Structural v8 | Selected final reviewer weights; unchanged frozen provenance fold 0; 66 structural/import inputs; route `0.15`, threshold `0.6882517225516912` |
+| Reviewer v7 | Retained runtime reference: `boundary_reviewer_v7_gbdt_candidate`; 66 features, 128 gradient-boosting trees; route `0.15`, threshold `0.6312998096487621` |
+| Structural v8 | Tracked final reviewer: `boundary_reviewer_v8_final`; unchanged frozen provenance fold 0; 66 active structural inputs in a 72-field runtime vector; route `0.15`, threshold `0.6882517225516912` |
 | Bounded v8 comparison | Same structural trees plus a constrained upstream-score correction; threshold `0.6722878125865038` |
 | Original expanded v8 | Preserved 72-feature reference; calibrated threshold `0.3181019231722836`; fixed comparison threshold `0.6397229919376241` |
 
@@ -29,7 +29,17 @@ structural weights into the existing runtime format, checks bit-for-bit cached
 score/decision parity, and creates a model ZIP for committing and packaging.
 The exported runtime vector has 72 fields; its first six upstream fields are
 unused, leaving the same 66 structural inputs. No refit or threshold change is
-selected. The model ZIP alone is not the Docker submission package.
+selected. The uploaded finalization report reproduced all 13,245 cached scores
+bit-for-bit, with zero decision mismatches. The final weights and sanitized
+export proof are now tracked; all earlier candidates remain intact.
+
+The [submission preflight](submission/README.md) stages an inference-only
+Python-3.11 context from the existing compact forest/adapter image. It exports
+preprocessing parameters without loading an old sklearn pickle in the new
+runtime. Restricted startup and real-PE comparisons must pass before packaging.
+The original Dockerfile and frozen experiment dependencies remain unchanged.
+Neither the weights ZIP nor the whole research repository is the final submission
+ZIP; the generated context has exactly one Dockerfile and all required inputs.
 
 Later native-coverage imports development reduced benign errors but detected
 290/481 malware versus 307/481 in its matched earlier-coverage control. It lost
@@ -239,10 +249,11 @@ They describe approved Python 3.11/3.12 slim images, a 300-second build limit,
 startup on port 8080 within 25 seconds, non-root execution, a read-only filesystem,
 no runtime network, 1 CPU and 1 GiB RAM.
 
-**The current Dockerfile uses Python 3.9 and legacy dependencies. It is not yet
-compatible with the advertised submission base-image policy.** Migrating it is a
-separate runtime/parity task; changing dependencies without validating extracted
-features can change model scores. The Canvas update does not explicitly change the previous runtime restrictions.
+**The reference Dockerfile uses Python 3.9 and legacy dependencies.** A separate
+Python-3.11 submission template and parameter-only preprocessing runtime are now
+available, but actual container parity/resource qualification is still pending.
+Changing dependencies without validating extracted features can change model
+scores. The Canvas update does not explicitly change the previous runtime restrictions.
 Confirm any revised approved image pins and runtime rules with the course's
 published instructions before packaging the final defense.
 

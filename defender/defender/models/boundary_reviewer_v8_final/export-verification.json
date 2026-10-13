@@ -1,0 +1,18 @@
+{
+  "complete": true,
+  "selected": "structural_primary",
+  "training": false,
+  "final_refit": false,
+  "parity": {
+    "sample_count": 13245,
+    "max_abs_score_error": 0.0,
+    "decision_mismatches": 0,
+    "score_equality": "bit-for-bit",
+    "upstream_invariance_checked": 64,
+    "raw_pe_docker_parity": false,
+    "note": "Cached Docker-compatible vectors and runtime tree evaluator. New Python/LIEF extraction still requires end-to-end container parity."
+  },
+  "uploaded_summary_sha256": "c530c051549efbc64240c6774740ed6e5ecb454b61f6cef144db637a6512b2fd",
+  "candidate_inventory_count": 16,
+  "container_qualification": "pending"
+}
