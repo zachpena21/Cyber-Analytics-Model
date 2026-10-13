@@ -10,6 +10,7 @@ from types import SimpleNamespace as NS
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 import numpy as np
@@ -28,6 +29,7 @@ from defender.models.boundary_reviewer import BoundaryReviewer
 from defender.models.submission_extractor import legacy_text_features
 import check_reviewer_v8_runtime_parity as check
 import prepare_reviewer_v8_submission as prepare
+import package_reviewer_v8_submission as package
 
 
 def fixture():
@@ -161,6 +163,22 @@ class SubmissionTests(unittest.TestCase):
             manifest=json.loads((output/'submission-manifest.json').read_text());self.assertFalse(manifest['runtime_qualified'])
             self.assertEqual(prepare.digest(output/'app/defender/models/boundary_reviewer_v8_final/model.json'),prepare.MODEL_SHA)
             with self.assertRaisesRegex(ValueError,'not empty'):prepare.prepare(repo,artifacts,output)
+            (repo/'submission/runtime-validation.json').write_text(json.dumps(dict(passed=True,model_sha256=prepare.MODEL_SHA)))
+            (root/'submission-preflight-summary.json').write_text(json.dumps(dict(complete=True,clean_build_seconds=60,
+                restricted_startup_seconds=3,image_id='test-image',diagnostics_disabled=True)))
+            (root/'runtime-parity-summary.json').write_text(json.dumps(dict(passed=True)))
+            resource=dict(image_id='test-image',oom_killed=False,memory_limit_bytes=1073741824,
+                readonly=True,nano_cpus=1000000000,cgroup_peak_bytes=1073741824)
+            resource_path=root/'submission-resource-summary.json';resource_path.write_text(json.dumps(resource))
+            with self.assertRaisesRegex(ValueError,'peak reaches'):package.package(repo,root)
+            resource['cgroup_peak_bytes']=300000000;resource_path.write_text(json.dumps(resource))
+            package.package(repo,root)
+            with zipfile.ZipFile(root/'reviewer-v8-submission.zip') as archive:
+                self.assertEqual(archive.namelist().count('Dockerfile'),1)
+                self.assertEqual(archive.read('app/defender/models/boundary_reviewer_v8_final/model.json'),prepare.verified_model_bytes(model))
+            self.assertFalse(json.loads((root/'submission-package-summary.json').read_text())['submission_ready'])
+            (output/'app/defender/models/compact/offsets.npy').write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError,'Context changed'):package.package(repo,root)
 
 
 if __name__=='__main__':unittest.main()

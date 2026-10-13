@@ -2,8 +2,11 @@
 
 The uploaded Windows preflight passed on October 13: clean build 67.79 seconds,
 restricted startup 3.47 seconds, and exact raw-PE parity for all 16 System32
-smoke samples (maximum error zero). This verifies that cohort only; the bounded
-benign/malware check below and final package review remain pending.
+smoke samples (maximum error zero). After restoring the legacy 300-byte named
+export limit, the uploaded bounded check passed on all 64 benign and 64 malware
+samples with no changed features or decisions (maximum score error 2.22e-16).
+Sanitized evidence is in `runtime-validation.json`. These checks verify the
+supplied cohorts only; final package and base-image review remain pending.
 
 The final reviewer weights are tracked at
 `defender/defender/models/boundary_reviewer_v8_final/`. All previous candidates
@@ -97,4 +100,24 @@ to `validation-data/v8-batch-runtime-parity-summary.json`; archive warnings and
 insufficient eligible coverage are reported rather than counted as a pass.
 This is runtime regression evidence on reused data, not a new accuracy estimate.
 The HTTP timings include network and diagnostic overhead.
+
+## Create the submission ZIP
+
+From the Windows repository directory, this command works in Command Prompt
+or PowerShell:
+
+```text
+git pull --ff-only origin main
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\package_reviewer_v8_submission.ps1"
+```
+
+Keep the tested v8 diagnostic instance on port 8083 running. The command uses
+the latest completed preflight directory, verifies its image identity and all
+context hashes, rejects stale inference code, records process/cgroup peak memory,
+and creates `reviewer-v8-submission.zip` with one root Dockerfile. Use `-Work`
+with a specific preflight directory if needed. It includes inference assets
+only and preserves earlier candidates, contexts and reports. It neither refits
+nor uploads anything. Send `submission-package-summary.json` for final review.
+The summary still marks base-image course verification pending; if an exact
+approved pin is required, update it and repeat the preflight before submission.
 
