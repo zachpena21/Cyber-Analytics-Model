@@ -7,6 +7,7 @@ from gevent.pywsgi import WSGIServer
 from defender.apps import create_app
 from defender.models.boundary_reviewer import BoundaryReviewer
 from defender.models.portable_model import PortableModernAdapter
+from defender.models.submission_extractor import install as install_extractor
 
 
 def main():
@@ -19,6 +20,7 @@ def main():
     if model.adapter_threshold!=.7 or model.adapter_metadata['base_benign_threshold']!=.510001:
         raise ValueError('Final upstream policy changed')
     model.boundary_reviewer=BoundaryReviewer(reviewer_path)
+    install_extractor()
     app=create_app(model,threshold=.510001)
     WSGIServer(('0.0.0.0',8080),app,log=None).serve_forever()
 

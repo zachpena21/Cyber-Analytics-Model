@@ -9,7 +9,8 @@ import shutil
 
 CODE=('__init__.py','apps.py','signature_policy.py','submission_main.py','models/__init__.py',
       'models/attribute_extractor.py','models/boundary_reviewer.py','models/nfs_model.py',
-      'models/compact_model.py','models/modern_adapter.py','models/portable_pipeline.py','models/portable_model.py')
+      'models/compact_model.py','models/modern_adapter.py','models/portable_pipeline.py','models/portable_model.py',
+      'models/submission_extractor.py')
 ARRAYS=('metadata.json','offsets.npy','children_left.npy','children_right.npy','features.npy','thresholds.npy','malware_probability.npy','feature-pipeline.json')
 MODEL_SHA='6dbe19e2f0962b4797ee5f58e17a37511b16dae94385253394e8f1add1df78be'
 

@@ -36,17 +36,19 @@ def compare(old,new,model):
     flags=[float(name in libraries) for name in IMPORTS];vector=old['reviewer_feature_vector']+flags+[sum(flags)]
     names=old['reviewer_feature_names']+['import_library='+name for name in IMPORTS]+['kernel_driver_import_count']
     if names!=model['feature_names'] or new['reviewer_feature_names']!=names:raise ValueError('Reference/candidate feature schemas differ')
-    changed=[];maximum=0.
+    changed=[];maximum=0.;differences=[]
     for name in fields:
         if old[name] is None or new[name] is None:
             if old[name]!=new[name]:changed.append(name)
         elif name in ('benign_probability','adapter_probability'):
             error=abs(float(old[name])-float(new[name]));maximum=max(maximum,error)
-            if error>1e-9:changed.append(name)
+            if error>1e-9:
+                changed.append(name);differences.append(dict(field=name,reference=old[name],candidate=new[name]))
         elif old[name]!=new[name]:changed.append(name)
     for name,before,after in zip(names,vector,new['reviewer_feature_vector']):
         error=abs(float(before)-float(after));maximum=max(maximum,error)
-        if error>1e-9:changed.append(name)
+        if error>1e-9:
+            changed.append(name);differences.append(dict(field=name,reference=before,candidate=after))
     routed=old['adapter_probability']>=model['route_min'];expected_score=model_score(model,vector)
     expected=int(expected_score>=model['reviewer_threshold']) if routed else int(old['adapter_probability']>=.7)
     if new['result']!=expected:changed.append('result')
@@ -54,7 +56,8 @@ def compare(old,new,model):
     if routed:
         error=abs(new['reviewer_probability']-expected_score);maximum=max(maximum,error)
         if error>1e-9:changed.append('reviewer_probability')
-    return dict(pass_=not changed,max_abs_error=maximum,changed_fields=sorted(set(changed)),expected_result=expected,actual_result=new['result'])
+    return dict(pass_=not changed,max_abs_error=maximum,changed_fields=sorted(set(changed)),
+        numeric_differences=differences,expected_result=expected,actual_result=new['result'])
 
 
 def run(args):

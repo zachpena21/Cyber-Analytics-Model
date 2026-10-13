@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import pickle
 import shutil
+import struct
+from types import SimpleNamespace as NS
 import sys
 import tempfile
 import unittest
@@ -23,6 +25,7 @@ from defender.models.modern_adapter import ModernAdapterModel
 from defender.models.portable_model import PortableModernAdapter
 from defender.models.portable_pipeline import PortableFeaturePipeline,export_pipeline
 from defender.models.boundary_reviewer import BoundaryReviewer
+from defender.models.submission_extractor import legacy_text_features
 import check_reviewer_v8_runtime_parity as check
 import prepare_reviewer_v8_submission as prepare
 
@@ -46,6 +49,26 @@ def fixture():
 
 
 class SubmissionTests(unittest.TestCase):
+    def test_legacy_import_and_forwarded_export_semantics(self):
+        raw=bytearray(1024);struct.pack_into('<I',raw,0x3c,64)
+        struct.pack_into('<H',raw,88,0x20b);struct.pack_into('<I',raw,200,256)
+        struct.pack_into('<I',raw,272,10);struct.pack_into('<I',raw,280,3)
+        struct.pack_into('<I',raw,288,320);struct.pack_into('<I',raw,292,340)
+        struct.pack_into('<III',raw,320,400,420,440);struct.pack_into('<HHH',raw,340,0,1,1)
+        raw[400:411]=b'PublicName\0';raw[420:426]=b'Alias\0';raw[440:450]=b'LastAlias\0'
+        binary=NS(has_imports=True,imports=[NS(name='normal.dll')],
+            delay_imports=[NS(entries=[NS(is_ordinal=False,name='Delayed'),NS(is_ordinal=True,name='')])],
+            imported_functions=[NS(name='Regular'),NS(name='ResolvedOrdinal'),NS(name='Delayed')],
+            has_exports=True,rva_to_offset=lambda rva:rva,
+            get_export=lambda:NS(entries=[NS(ordinal=10,name='other.ForwardTarget'),NS(ordinal=11,name='Alias'),NS(ordinal=12,name='unnamed.Target')]))
+        result=legacy_text_features(binary,bytes(raw))
+        self.assertEqual(result,dict(libraries='normal.dll',functions='Regular ResolvedOrdinal',
+            exports_list='PublicName LastAlias unnamed.Target',exports=3))
+        binary.has_imports=False;binary.has_exports=False
+        self.assertEqual(legacy_text_features(binary,b''),dict(libraries='',functions='',exports_list='',exports=0))
+        binary.has_exports=True
+        with self.assertRaises(struct.error):legacy_text_features(binary,b'MZ')
+
     def test_actual_final_weights_ignore_upstream_scores(self):
         path=Path(__file__).resolve().parents[1]/'defender/defender/models/boundary_reviewer_v8_final/model.json'
         self.assertEqual(prepare.verified_model_bytes(path),path.read_bytes().replace(b'\r\n',b'\n'))

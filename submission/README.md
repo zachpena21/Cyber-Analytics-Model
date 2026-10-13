@@ -61,3 +61,13 @@ address for both services and local benign/malware files via `--files`:
   --files /path/to/benign.exe /path/to/malware.exe \
   --output validation-data/v8-runtime-parity-additional.json
 ```
+# Parser compatibility
+
+The submission-only extractor restores two LIEF 0.11.5 text conventions on
+the pinned LIEF 0.13.2 parser: delay imports are excluded from imported-library
+and function text, and named forwarded exports use the export-name table.
+This follows the upstream `src/PE/Binary.cpp` and `src/PE/Parser.cpp` at those
+release tags. The frozen reference extractor and all model weights remain
+unchanged. Raw-PE parity still must pass; this compatibility layer does not
+establish equivalence on every malformed PE.
+
