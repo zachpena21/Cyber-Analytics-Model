@@ -4,6 +4,7 @@ import gzip
 import json
 from pathlib import Path
 import pickle
+import shutil
 import sys
 import tempfile
 import unittest
@@ -47,7 +48,7 @@ def fixture():
 class SubmissionTests(unittest.TestCase):
     def test_actual_final_weights_ignore_upstream_scores(self):
         path=Path(__file__).resolve().parents[1]/'defender/defender/models/boundary_reviewer_v8_final/model.json'
-        self.assertEqual(prepare.digest(path),prepare.MODEL_SHA)
+        self.assertEqual(prepare.verified_model_bytes(path),path.read_bytes().replace(b'\r\n',b'\n'))
         payload=json.loads(path.read_text());reviewer=BoundaryReviewer(path)
         self.assertEqual(len(reviewer.estimators),128);self.assertEqual(reviewer.route_min,.15)
         rng=np.random.default_rng(8704)
@@ -65,6 +66,15 @@ class SubmissionTests(unittest.TestCase):
             np.testing.assert_array_equal(portable._extract_features(extra).toarray(),pipeline._extract_features(extra).toarray())
             pipeline.categorical_extractor.drop='first'
             with self.assertRaisesRegex(ValueError,'Unsupported original'):export_pipeline(pipeline)
+
+    def test_windows_model_newlines_and_weight_changes(self):
+        source=Path(__file__).resolve().parents[1]/'defender/defender/models/boundary_reviewer_v8_final/model.json'
+        canonical=prepare.verified_model_bytes(source)
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'model.json';path.write_bytes(canonical.replace(b'\n',b'\r\n'))
+            self.assertEqual(prepare.verified_model_bytes(path),canonical)
+            path.write_bytes(path.read_bytes()+b' ')
+            with self.assertRaisesRegex(ValueError,'Final v8 model hash differs'):prepare.verified_model_bytes(path)
 
     def test_portable_forest_and_adapter_unchanged(self):
         pipeline,frame=fixture()
@@ -103,11 +113,20 @@ class SubmissionTests(unittest.TestCase):
             (compact/'pipeline-export-summary.json').write_text(json.dumps(dict(complete=True,export_sha256=prepare.digest(compact/'feature-pipeline.json'))))
             for name in ('metadata.json','coefficients.npy','intercept.npy'):(adapter/name).write_text('{}')
             (compact/'malware.exe').write_bytes(b'MZ');(compact/'feature_pipeline.pkl.gz').write_bytes(b'oldpickle')
-            output=root/'context';prepare.prepare(actual,artifacts,output)
+            # Exercise a Windows checkout all the way through context creation.
+            repo=root/'repo'
+            for name in prepare.CODE:
+                relative=Path('defender/defender')/name;destination=repo/relative
+                destination.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(actual/relative,destination)
+            relative=Path('defender/defender/models/boundary_reviewer_v8_final')
+            shutil.copytree(actual/relative,repo/relative)
+            model=repo/relative/'model.json';model.write_bytes(prepare.verified_model_bytes(model).replace(b'\n',b'\r\n'))
+            shutil.copytree(actual/'submission',repo/'submission')
+            output=root/'context';prepare.prepare(repo,artifacts,output)
             self.assertEqual(len(list(output.rglob('Dockerfile'))),1);self.assertFalse(list(output.rglob('*.exe')));self.assertFalse(list(output.rglob('*.pkl.gz')))
             manifest=json.loads((output/'submission-manifest.json').read_text());self.assertFalse(manifest['runtime_qualified'])
             self.assertEqual(prepare.digest(output/'app/defender/models/boundary_reviewer_v8_final/model.json'),prepare.MODEL_SHA)
-            with self.assertRaisesRegex(ValueError,'not empty'):prepare.prepare(actual,artifacts,output)
+            with self.assertRaisesRegex(ValueError,'not empty'):prepare.prepare(repo,artifacts,output)
 
 
 if __name__=='__main__':unittest.main()

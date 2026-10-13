@@ -17,9 +17,20 @@ MODEL_SHA='6dbe19e2f0962b4797ee5f58e17a37511b16dae94385253394e8f1add1df78be'
 def digest(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def verified_model_bytes(path):
+    raw=Path(path).read_bytes()
+    # Git autocrlf may change checkout newlines on Windows. Only accept bytes
+    # that reproduce the frozen artifact exactly after CRLF-to-LF conversion.
+    canonical=raw.replace(b'\r\n',b'\n')
+    actual=hashlib.sha256(canonical).hexdigest()
+    if actual!=MODEL_SHA:
+        raise ValueError(f'Final v8 model hash differs: checkout={hashlib.sha256(raw).hexdigest()}, LF={actual}, expected={MODEL_SHA}')
+    return canonical
+
+
 def prepare(repo,artifacts,output):
     model=repo/'defender/defender/models/boundary_reviewer_v8_final/model.json'
-    if digest(model)!=MODEL_SHA:raise ValueError('Final v8 model hash differs')
+    model_bytes=verified_model_bytes(model)
     proof=json.loads((artifacts/'compact/pipeline-export-summary.json').read_text())
     if proof.get('complete') is not True or proof['export_sha256']!=digest(artifacts/'compact/feature-pipeline.json'):
         raise ValueError('Portable pipeline export not verified')
@@ -31,8 +42,10 @@ def prepare(repo,artifacts,output):
     for name in ARRAYS:copy(artifacts/'compact'/name,'app/defender/models/compact/'+name)
     for name in ('metadata.json','coefficients.npy','intercept.npy'):
         copy(artifacts/'modern_adapter'/name,'app/defender/models/modern_adapter/'+name)
-    for name in ('model.json','metadata.json','export-verification.json'):
+    for name in ('metadata.json','export-verification.json'):
         copy(model.parent/name,'app/defender/models/boundary_reviewer_v8_final/'+name)
+    destination=output/'app/defender/models/boundary_reviewer_v8_final/model.json'
+    destination.write_bytes(model_bytes)
     for name in ('Dockerfile','requirements.txt'):copy(repo/'submission'/name,name)
     files={str(path.relative_to(output)).replace('\\','/'):digest(path) for path in output.rglob('*') if path.is_file()}
     if len(list(output.rglob('Dockerfile')))!=1 or (output/'Dockerfile').stat().st_size>100*1024:raise ValueError('Dockerfile count/size invalid')
