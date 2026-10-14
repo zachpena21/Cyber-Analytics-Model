@@ -1,0 +1,149 @@
+{
+  "complete": true,
+  "training": false,
+  "deployment_changed": false,
+  "policy": {
+    "name": "v8-t060-agreement-rescue-research",
+    "reviewer_threshold": 0.6,
+    "route_min": 0.15,
+    "adapter_min": 0.99,
+    "base_benign_max": 0.2,
+    "reviewer_min": 0.3,
+    "require_adjusted_base_trigger": true,
+    "exclude_verified_signatures": true
+  },
+  "scope": "Manually specified rule informed by disclosed TA miss. Development evidence only; no global FPR guarantee.",
+  "ta_tuning_set": {
+    "sample_count": 100,
+    "baseline": {
+      "samples": 100,
+      "benign": 50,
+      "malware": 50,
+      "false_positives": 0,
+      "true_positives": 49,
+      "false_negatives": 1,
+      "false_positive_rate": 0.0,
+      "detection_rate": 0.98,
+      "accuracy": 0.99
+    },
+    "candidate": {
+      "samples": 100,
+      "benign": 50,
+      "malware": 50,
+      "false_positives": 0,
+      "true_positives": 50,
+      "false_negatives": 0,
+      "false_positive_rate": 0.0,
+      "detection_rate": 1.0,
+      "accuracy": 1.0
+    },
+    "rescued_malware": 1,
+    "new_false_positives": 0,
+    "malware_regressions": 0,
+    "no_new_false_positives": true,
+    "changes": [
+      {
+        "sha256": "2a6ebbf3901296ecc772eaed7e22b5cfa0e2c316323ac5f74253f63b77823f31",
+        "label": 1,
+        "source": "Phorpiex",
+        "reviewer_probability": 0.3368946435253517,
+        "adapter_probability": 0.9959390297891729,
+        "benign_probability": 0.17000000000000004
+      }
+    ]
+  },
+  "full_development_pool": null,
+  "historical_upstream_screen": {
+    "unique_samples": 4205,
+    "unique_benign": 3933,
+    "unique_malware": 272,
+    "observations": 6823,
+    "possible_new_benign_flags": [],
+    "no_benign_enters_upstream_gate": true,
+    "reports": [
+      {
+        "name": "comparison-scores(1).csv",
+        "sha256": "4511d93808ffcf53e1ad48d097a7d72fb335e9af8b9b7527ddfbd2d9c314788d",
+        "rows": 662
+      },
+      {
+        "name": "comparison-scores(2).csv",
+        "sha256": "46a61e090219967d7605f4c8767b993ad7ad0e6e03ad35652c2085fedf8112fb",
+        "rows": 631
+      },
+      {
+        "name": "comparison-scores(3).csv",
+        "sha256": "13329b77915c20211ac89a7c93f0f7117c862236f6863f8c96a181a5937c9de6",
+        "rows": 618
+      },
+      {
+        "name": "comparison-scores.csv",
+        "sha256": "daf377d0f483cf77fb3d2262c5db11802006de405a3a07b4aaeec5156dbc0453",
+        "rows": 684
+      },
+      {
+        "name": "reviewer-v5-all-v11.csv",
+        "sha256": "10da0d1801574e0a084c6a976c9e654e44fccbbc19a5f72c5416f196ebc80685",
+        "rows": 602
+      },
+      {
+        "name": "reviewer-v5-all-v7.csv",
+        "sha256": "75bbf6d511a7a534e5410c3e66f62d5ca3cf20ca05e2af7bff4299724e7c5757",
+        "rows": 1008
+      },
+      {
+        "name": "reviewer-v6-1-all-v11.csv",
+        "sha256": "bbf08c287c3337be9105eb40f6d36362bff916e6c68918da7f9fbfca0e447f16",
+        "rows": 602
+      },
+      {
+        "name": "reviewer-v6-1-all-v7.csv",
+        "sha256": "24ecfa9dcd67c3e3f43204736f9695f664d8061c5c1b87abe61baf9509ff898c",
+        "rows": 1008
+      },
+      {
+        "name": "reviewer-v7-all-v7.csv",
+        "sha256": "e6f6b8ae3dffbd689789877df1b6faec1b1ccd4a313a9a2edff0cc0b5f5755a8",
+        "rows": 1008
+      }
+    ],
+    "matched_final_model_cohorts": [
+      {
+        "report": "comparison-scores(3).csv",
+        "sha256": "13329b77915c20211ac89a7c93f0f7117c862236f6863f8c96a181a5937c9de6",
+        "sample_count": 618,
+        "baseline": {
+          "samples": 618,
+          "benign": 526,
+          "malware": 92,
+          "false_positives": 5,
+          "true_positives": 75,
+          "false_negatives": 17,
+          "false_positive_rate": 0.009505703422053232,
+          "detection_rate": 0.8152173913043478,
+          "accuracy": 0.9644012944983819
+        },
+        "candidate": {
+          "samples": 618,
+          "benign": 526,
+          "malware": 92,
+          "false_positives": 5,
+          "true_positives": 75,
+          "false_negatives": 17,
+          "false_positive_rate": 0.009505703422053232,
+          "detection_rate": 0.8152173913043478,
+          "accuracy": 0.9644012944983819
+        },
+        "rescued_malware": 0,
+        "new_false_positives": 0,
+        "malware_regressions": 0,
+        "no_new_false_positives": true,
+        "changes": []
+      }
+    ],
+    "scope": "Conservative upstream-gate screen; only explicitly matched structural-primary cohorts have accuracy metrics."
+  },
+  "no_new_false_positives_on_full_pool": null,
+  "ready_for_runtime_test": false,
+  "ta_report_sha256": "fa45da4e584e06f538789b44318c0550b2dd6806f7418bfa8f385e4397a3e8dc"
+}

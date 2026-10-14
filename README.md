@@ -6,6 +6,12 @@ boundary reviewer. Training and diagnostics run separately from inference.
 
 ## Whitebox candidate — October 14, 2026
 
+An [agreement rescue experiment](docs/reviewer-v8-phorpiex-rescue.md) recovers
+the last TA Phorpiex miss in cached replay without new positives among the
+available 3,933 unique historical benign files. The exact full 13,245-vector
+development-pool check remains required on the VM before a runtime candidate
+is implemented. The passing 0.60 candidate is preserved.
+
 The submitted v8 ZIP remains the frozen blackbox baseline. A separate
 [`0.60` threshold candidate](docs/reviewer-v8-whitebox-t060.md) preserves its
 weights and adapter route while lowering only the reviewer decision threshold.
