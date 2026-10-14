@@ -15,7 +15,9 @@ The slowest recorded diagnostic request was 0.50 seconds. See the
 The full development-pool check also passed: 41/12,764 benign errors and
 339/481 malware detections are unchanged, with zero added false positives.
 The TA set informed tuning; these results are not independent accuracy estimates.
-A standalone whitebox ZIP, clean-build and resource checks remain pending.
+The [standalone whitebox ZIP](docs/whitebox-submission-package.md) is now
+assembled and its file hashes/integrity checks passed. Clean-build and resource
+qualification of that exact ZIP remains pending on Windows Docker.
 
 The submitted v8 ZIP remains the frozen blackbox baseline. A separate
 [`0.60` threshold candidate](docs/reviewer-v8-whitebox-t060.md) preserves its
