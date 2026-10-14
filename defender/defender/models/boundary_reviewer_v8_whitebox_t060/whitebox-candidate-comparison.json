@@ -1,0 +1,114 @@
+{
+  "complete": true,
+  "role": "whitebox_threshold_candidate",
+  "training": false,
+  "threshold_tuning": true,
+  "threshold": 0.6,
+  "route_min": 0.15,
+  "source_model_sha256": "6dbe19e2f0962b4797ee5f58e17a37511b16dae94385253394e8f1add1df78be",
+  "runtime_verified": false,
+  "scope": "TA set informed threshold selection; all replay metrics are development/tuning evidence.",
+  "input_sha256": {
+    "baseline_report": "13f630834687c024c05aaf6c4b3d81bb40c60d0b67aa2de93be9f70ec0cf796f"
+  },
+  "ta_tuning_set": {
+    "baseline": {
+      "samples": 100,
+      "benign": 50,
+      "malware": 50,
+      "false_positives": 0,
+      "true_positives": 47,
+      "false_negatives": 3,
+      "false_positive_rate": 0.0,
+      "detection_rate": 0.94,
+      "accuracy": 0.97
+    },
+    "candidate": {
+      "samples": 100,
+      "benign": 50,
+      "malware": 50,
+      "false_positives": 0,
+      "true_positives": 49,
+      "false_negatives": 1,
+      "false_positive_rate": 0.0,
+      "detection_rate": 0.98,
+      "accuracy": 0.99
+    },
+    "changed": [
+      {
+        "sha256": "db0424208bbbb7fa162719bfc67b6d36c33caf7c924e6b675312adbd26d9634d",
+        "label": 1,
+        "source": "Phorpiex",
+        "reviewer_probability": 0.6023738215170233,
+        "before": 0,
+        "after": 1
+      },
+      {
+        "sha256": "f116c0400a9cd5d5629bdf6453cabaa4f1715a042d4efd6e5882f30f6642c1aa",
+        "label": 1,
+        "source": "Phorpiex",
+        "reviewer_probability": 0.6023738215170233,
+        "before": 0,
+        "after": 1
+      }
+    ],
+    "score_or_weight_changes": 0
+  },
+  "historical_cohorts": [
+    {
+      "file": "comparison-scores(3).csv",
+      "sha256": "13329b77915c20211ac89a7c93f0f7117c862236f6863f8c96a181a5937c9de6",
+      "ta_overlap": 0,
+      "baseline": {
+        "samples": 618,
+        "benign": 526,
+        "malware": 92,
+        "false_positives": 2,
+        "true_positives": 75,
+        "false_negatives": 17,
+        "false_positive_rate": 0.0038022813688212928,
+        "detection_rate": 0.8152173913043478,
+        "accuracy": 0.9692556634304207
+      },
+      "candidate": {
+        "samples": 618,
+        "benign": 526,
+        "malware": 92,
+        "false_positives": 5,
+        "true_positives": 75,
+        "false_negatives": 17,
+        "false_positive_rate": 0.009505703422053232,
+        "detection_rate": 0.8152173913043478,
+        "accuracy": 0.9644012944983819
+      },
+      "changed": [
+        {
+          "sha256": "225dc74559499f86b8efcafe83881bfff9696a09faccb2a6c5ff76b9970bd7d2",
+          "label": 0,
+          "source": "scikit_learn-1.9.1-cp313-cp313-win_amd64",
+          "reviewer_probability": 0.6005482927795814,
+          "before": 0,
+          "after": 1
+        },
+        {
+          "sha256": "027afbd926563178d311edb21c5bc6c55fe9ae8b9737071582a21dfc7a74018c",
+          "label": 0,
+          "source": "pillow-12.2.0-cp313-cp313-win_amd64",
+          "reviewer_probability": 0.6263913644445718,
+          "before": 0,
+          "after": 1
+        },
+        {
+          "sha256": "9b559021606070d33f874b1f0c969c2e665d49657e99981e40656276cacf64d1",
+          "label": 0,
+          "source": "lxml-6.0.4-cp313-cp313-win_amd64",
+          "reviewer_probability": 0.6024764477597372,
+          "before": 0,
+          "after": 1
+        }
+      ],
+      "score_or_weight_changes": 0
+    }
+  ],
+  "candidate_model_sha256": "a9e350a04f77ff912486d45f9813b04dd686d5cae6661debd6eed316838d06e5"
+}

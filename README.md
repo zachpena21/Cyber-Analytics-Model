@@ -4,7 +4,20 @@ A PE malware classifier for the course black-box defense project. The runtime
 combines a compact legacy random forest, a modern linear adapter, and an optional
 boundary reviewer. Training and diagnostics run separately from inference.
 
-## Current model status — October 13, 2026
+## Whitebox candidate — October 14, 2026
+
+The submitted v8 ZIP remains the frozen blackbox baseline. A separate
+[`0.60` threshold candidate](docs/reviewer-v8-whitebox-t060.md) preserves its
+weights and adapter route while lowering only the reviewer decision threshold.
+Cached TA-set replay gives 49/50 malware detections and zero benign errors;
+the earlier 618-row cohort gives 75/92 detections and 5/526 benign errors (0.95%).
+The TA set informed tuning. These are replay/development results, and the new
+candidate still needs actual Docker verification before packaging.
+
+Run the [Windows verification workflow](docs/reviewer-v8-whitebox-t060.md)
+on port 8084 using the existing `blackbox-defense:v8-final` image.
+
+## Submitted model status — October 13, 2026
 
 | Component | Current state |
 |---|---|
