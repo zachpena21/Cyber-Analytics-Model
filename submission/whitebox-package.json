@@ -14,11 +14,39 @@
     "contains_samples": false,
     "dependencies_unchanged": true
   },
-  "standalone_runtime_qualified": false,
+  "standalone_runtime_qualified": true,
   "prior_overlay_ta_result": {
     "malware_detected": 50,
     "benign_correct": 50,
     "errors": 0
   },
-  "pending": "Run qualify_reviewer_v8_whitebox.ps1 against this exact ZIP before submission."
+  "pending": "Exact course base-image pin confirmation remains unrecorded; no external submission performed.",
+  "qualification": {
+    "complete": true,
+    "standalone_runtime_qualified": true,
+    "zip_name": "reviewer-v8-whitebox-submission.zip",
+    "zip_sha256": "c493bf7dbf934f3fd81d1013e60606a6da7372adf2bc4f544cf3ac9023eea05d",
+    "image_id": "sha256:8a0ed884ba79fa3c776801f385b485ae64d6d63f94a5089c92998e7c9506e862",
+    "clean_build_seconds": 32.5536139,
+    "restricted_startup_seconds": 1.7851275,
+    "diagnostics_disabled": true,
+    "malware_detected": 50,
+    "benign_correct": 50,
+    "errors": 0,
+    "max_public_http_seconds": 0.4201951859995461,
+    "resources": {
+      "process": {
+        "VmHWM": "505880 kB",
+        "VmRSS": "437500 kB"
+      },
+      "cgroup_peak_bytes": 386551808
+    },
+    "memory_limit_bytes": 1073741824,
+    "nano_cpus": 1000000000,
+    "readonly": true,
+    "network": "none",
+    "oom_killed": false,
+    "course_base_pin_confirmed": false,
+    "scope": "Exact standalone ZIP; disclosed TA tuning set; test inputs mounted read-only, inference code/models bundled in image."
+  }
 }

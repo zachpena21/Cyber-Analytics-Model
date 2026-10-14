@@ -18,9 +18,28 @@ ZIP SHA-256 and validation results. Creation checks verified ZIP integrity,
 all 30 manifest file hashes, one root Dockerfile, and Python compilation.
 The actual overlay runtime previously achieved 50/50 malware detections and
 zero benign errors. That is tuning-set evidence; a standalone qualification
-report for this exact ZIP is still required.
+report for this exact ZIP has now passed. See the
+[recorded qualification](../submission/whitebox-qualification.json):
 
-## Qualify the downloaded ZIP on Windows
+| Check | Measured result |
+|---|---:|
+| Clean build | 32.55 seconds |
+| Restricted startup | 1.79 seconds |
+| TA malware / benign correct | 50/50 and 50/50 |
+| Scoring errors | 0 |
+| Maximum public request | 0.42 seconds |
+| Process peak memory | 494 MiB |
+| Cgroup-reported peak | 369 MiB |
+
+Both reported memory measures are below the 1 GiB cap; process and cgroup
+accounting are different measures. Runtime used one CPU, no network, read-only
+root filesystem and disabled diagnostics. No OOM was reported. The qualified
+ZIP hash is `c493bf7dbf934f3fd81d1013e60606a6da7372adf2bc4f544cf3ac9023eea05d`.
+The archive was not modified after this test. Its internal manifest records
+the build-context preparation state; this separate report records subsequent
+runtime qualification. Exact course base-pin confirmation remains unrecorded.
+
+## Reproduce qualification on Windows
 
 Save the whitebox ZIP and the TA archive in Downloads, start Docker Desktop,
 then run from the repository in Command Prompt:

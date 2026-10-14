@@ -16,8 +16,11 @@ The full development-pool check also passed: 41/12,764 benign errors and
 339/481 malware detections are unchanged, with zero added false positives.
 The TA set informed tuning; these results are not independent accuracy estimates.
 The [standalone whitebox ZIP](docs/whitebox-submission-package.md) is now
-assembled and its file hashes/integrity checks passed. Clean-build and resource
-qualification of that exact ZIP remains pending on Windows Docker.
+qualified: its exact SHA-256 matches the tested archive. Clean build took 32.55
+seconds, restricted startup 1.79 seconds, all 100 TA public classifications were
+correct, and peak process memory was 494 MiB. Diagnostics were disabled; runtime
+used a read-only filesystem, no network, one CPU and a 1 GiB cap, with no OOM.
+See the [qualification report](submission/whitebox-qualification.json).
 
 The submitted v8 ZIP remains the frozen blackbox baseline. A separate
 [`0.60` threshold candidate](docs/reviewer-v8-whitebox-t060.md) preserves its
