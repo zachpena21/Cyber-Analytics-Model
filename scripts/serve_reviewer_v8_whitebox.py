@@ -16,6 +16,19 @@ def checked_candidate(baseline_bytes, candidate_bytes):
     return actual
 
 
+def checked_rescue_proof(raw):
+    from evaluate_reviewer_v8_rescue import CACHE_SHA, POLICY
+    canonical = raw.replace(b'\r\n', b'\n')
+    if hashlib.sha256(canonical).hexdigest() != 'c036f674c2c55583217d2927eaf9e79533f7454231d65245edc25a39c149aae0':
+        raise ValueError('Expected verified full-pool rescue proof')
+    proof = json.loads(canonical)
+    if (proof['policy'] != POLICY or proof['cache_sha256'] != CACHE_SHA
+            or not proof['ready_for_runtime_test']
+            or proof['full_development_pool']['new_false_positives'] != 0):
+        raise ValueError('Rescue policy lacks passing full-pool evidence')
+    return proof
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--model', type=Path, required=True)
@@ -26,14 +39,9 @@ def main():
     baseline = root/'boundary_reviewer_v8_final/model.json'
     checked_candidate(baseline.read_bytes(), args.model.read_bytes())
     if args.agreement_rescue:
-        from evaluate_reviewer_v8_rescue import CACHE_SHA, POLICY
-        if args.rescue_proof is None or hashlib.sha256(args.rescue_proof.read_bytes()).hexdigest() != 'c036f674c2c55583217d2927eaf9e79533f7454231d65245edc25a39c149aae0':
+        if args.rescue_proof is None:
             raise ValueError('Expected verified full-pool rescue proof')
-        proof = json.loads(args.rescue_proof.read_text())
-        if (proof['policy'] != POLICY or proof['cache_sha256'] != CACHE_SHA
-                or not proof['ready_for_runtime_test']
-                or proof['full_development_pool']['new_false_positives'] != 0):
-            raise ValueError('Rescue policy lacks passing full-pool evidence')
+        checked_rescue_proof(args.rescue_proof.read_bytes())
     # Imports use the tested image, including its LIEF compatibility layer.
     from gevent.pywsgi import WSGIServer
     from defender.apps import create_app

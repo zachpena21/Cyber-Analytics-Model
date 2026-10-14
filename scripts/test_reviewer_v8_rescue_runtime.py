@@ -40,6 +40,13 @@ class Model:
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_proof_accepts_windows_newlines_and_rejects_modified_evidence(self):
+        from serve_reviewer_v8_whitebox import checked_rescue_proof
+        raw = (Path(__file__).resolve().parents[1]/'docs/evidence/phorpiex-rescue-full-pool.json').read_bytes()
+        self.assertTrue(checked_rescue_proof(raw.replace(b'\n', b'\r\n'))['ready_for_runtime_test'])
+        with self.assertRaises(ValueError):
+            checked_rescue_proof(raw + b' ')
+
     def handlers(self, model, signature=False):
         extractor = types.SimpleNamespace(PEAttributeExtractor=lambda raw: types.SimpleNamespace(extract=lambda: {}))
         flask = types.SimpleNamespace(Flask=App, jsonify=lambda **kw: kw,
