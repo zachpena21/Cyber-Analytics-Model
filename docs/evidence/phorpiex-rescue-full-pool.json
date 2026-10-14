@@ -1,0 +1,51 @@
+{
+  "complete": true,
+  "training": false,
+  "deployment_changed": false,
+  "policy": {
+    "name": "v8-t060-agreement-rescue-research",
+    "reviewer_threshold": 0.6,
+    "route_min": 0.15,
+    "adapter_min": 0.99,
+    "base_benign_max": 0.2,
+    "reviewer_min": 0.3,
+    "require_adjusted_base_trigger": true,
+    "exclude_verified_signatures": true
+  },
+  "scope": "Manually specified rule informed by disclosed TA miss. Development evidence only; no global FPR guarantee.",
+  "ta_tuning_set": null,
+  "full_development_pool": {
+    "sample_count": 13245,
+    "baseline": {
+      "samples": 13245,
+      "benign": 12764,
+      "malware": 481,
+      "false_positives": 41,
+      "true_positives": 339,
+      "false_negatives": 142,
+      "false_positive_rate": 0.003212159197743654,
+      "detection_rate": 0.7047817047817048,
+      "accuracy": 0.9861834654586636
+    },
+    "candidate": {
+      "samples": 13245,
+      "benign": 12764,
+      "malware": 481,
+      "false_positives": 41,
+      "true_positives": 339,
+      "false_negatives": 142,
+      "false_positive_rate": 0.003212159197743654,
+      "detection_rate": 0.7047817047817048,
+      "accuracy": 0.9861834654586636
+    },
+    "rescued_malware": 0,
+    "new_false_positives": 0,
+    "malware_regressions": 0,
+    "no_new_false_positives": true,
+    "changes": []
+  },
+  "historical_upstream_screen": null,
+  "no_new_false_positives_on_full_pool": true,
+  "ready_for_runtime_test": true,
+  "cache_sha256": "a264e6da9633346eddda084814242608d513ea343bd294c64cb67b5b12f57471"
+}

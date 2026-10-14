@@ -9,8 +9,10 @@ boundary reviewer. Training and diagnostics run separately from inference.
 An [agreement rescue experiment](docs/reviewer-v8-phorpiex-rescue.md) recovers
 the last TA Phorpiex miss in cached replay without new positives among the
 available 3,933 unique historical benign files. The exact full 13,245-vector
-development-pool check remains required on the VM before a runtime candidate
-is implemented. The passing 0.60 candidate is preserved.
+development-pool check now passed: 41/12,764 benign errors and 339/481 malware
+detections are unchanged, with zero added false positives. The optional rescue
+runtime is ready for Docker testing on port 8085. The passing 0.60 candidate is
+preserved; the rescue has not yet been packaged or verified on raw TA files.
 
 The submitted v8 ZIP remains the frozen blackbox baseline. A separate
 [`0.60` threshold candidate](docs/reviewer-v8-whitebox-t060.md) preserves its

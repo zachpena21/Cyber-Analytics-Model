@@ -5,51 +5,21 @@ import csv
 import hashlib
 import json
 import math
+import sys
 from pathlib import Path
 
 from prepare_reviewer_v8_whitebox import candidate_from_bytes, metrics
 from score_reviewer_v8_whitebox import model_score
 
-POLICY = dict(name='v8-t060-agreement-rescue-research', reviewer_threshold=.60,
-              route_min=.15, adapter_min=.99, base_benign_max=.20,
-              reviewer_min=.30, require_adjusted_base_trigger=True,
-              exclude_verified_signatures=True)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"defender"))
+from defender.reviewer_rescue import POLICY, number, gates, predict
+
 CACHE_SHA = 'a264e6da9633346eddda084814242608d513ea343bd294c64cb67b5b12f57471'
 IMPORTS = ('ntoskrnl.exe', 'hal.dll', 'ndis.sys', 'wdfldr.sys', 'ks.sys')
 
 
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
-def number(value):
-    if value in (None, '', False, 'False', 'false'):
-        return 0.
-    if value in (True, 'True', 'true'):
-        return 1.
-    value = float(value)
-    if not math.isfinite(value):
-        raise ValueError('Non-finite numeric input')
-    return value
-
-
-def gates(row):
-    adapter, benign = number(row['adapter_probability']), number(row['benign_probability'])
-    if not 0 <= adapter <= 1 or not 0 <= benign <= 1:
-        raise ValueError('Upstream probability out of range')
-    return (adapter >= POLICY['adapter_min'] and benign <= POLICY['base_benign_max']
-            and number(row['base_trigger_adjusted']) == 1
-            and number(row['signature_verified']) == 0)
-
-
-def predict(row, score):
-    score = number(score)
-    if not 0 <= score <= 1:
-        raise ValueError('Reviewer score out of range')
-    routed = number(row['adapter_probability']) >= POLICY['route_min']
-    baseline = int(score >= POLICY['reviewer_threshold']) if routed else int(number(row['adapter_probability']) >= .7)
-    rescued = bool(baseline == 0 and routed and score >= POLICY['reviewer_min'] and gates(row))
-    return baseline, int(baseline == 1 or rescued), rescued
 
 
 def summarize(rows):

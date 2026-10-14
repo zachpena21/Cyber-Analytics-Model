@@ -70,6 +70,11 @@ def run(args):
             or 'ReviewerV8' not in info.get('classifier', '')):
         raise ValueError('Service must match the selected v8 model with diagnostics enabled')
     rows = []
+    rescue_policy = info.get('reviewer_agreement_rescue')
+    if rescue_policy:
+        from defender.reviewer_rescue import POLICY, predict as rescue_predict
+        if rescue_policy != POLICY:
+            raise ValueError('Service agreement rescue policy differs from checked rule')
     target = args.output_prefix.with_suffix('.json')
     target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -88,6 +93,8 @@ def run(args):
             false_positive_rate=len(fp)/50 if complete and len(valid)==100 else None,
             accuracy=(tp+tn)/100 if complete and len(valid)==100 else None,
             training=False, scope='Selected-v8 runtime measurement on instructor-disclosed whitebox tuning samples; not independent validation.', rows=rows)
+        if rescue_policy:
+            report['agreement_rescue_count'] = sum(bool(r.get('reviewer_agreement_rescue_applied')) for r in valid)
         temp = target.with_suffix('.tmp')
         temp.write_text(json.dumps(report, indent=2)+'\n'); temp.replace(target)
         fields = ['sha256','is_malware','family','source_name','size','result','correct',
@@ -116,6 +123,13 @@ def run(args):
             offline = model_score(model, details['reviewer_feature_vector'])
             if details['reviewer_routed'] and abs(offline-details['reviewer_probability']) > 1e-9:
                 raise ValueError('Service reviewer score differs from frozen model')
+            expected = int(offline >= model['reviewer_threshold']) if details['reviewer_routed'] else int(details['adapter_probability'] >= details['adapter_threshold'])
+            if rescue_policy:
+                _, expected, rescued = rescue_predict(details, offline)
+                if details.get('reviewer_agreement_rescue_applied') != rescued:
+                    raise ValueError('Service rescue flag differs from fixed rule')
+            if expected != details['result']:
+                raise ValueError('Service result differs from offline cascade')
             public = request(service + '/', raw)
             if public.get('result') != details['result']:
                 raise ValueError('Public and diagnostic decisions differ')

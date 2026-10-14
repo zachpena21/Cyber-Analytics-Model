@@ -2,7 +2,51 @@
 
 This research experiment tries to recover the last disclosed Phorpiex miss
 without adding false positives relative to the passing threshold-0.60 candidate.
-That fallback remains unchanged. No new inference policy has been deployed.
+That fallback remains unchanged. The rescue is now implemented as an optional
+Docker experiment; its raw-file runtime verification remains pending.
+
+## Full development-pool result and Docker verification
+
+The uploaded full-pool reports were byte-identical and bind to the expected
+cache hash. They record zero changed decisions across 13,245 files:
+
+| Full development pool | t060 | Rescue hypothesis |
+|---|---:|---:|
+| Benign errors / 12,764 | 41 (0.321%) | 41 (0.321%) |
+| Malware detected / 481 | 339 (70.48%) | 339 (70.48%) |
+| New benign errors | — | 0 |
+
+See [the preserved report](evidence/phorpiex-rescue-full-pool.json).
+These inspected development results establish no new false positives on this
+pool; they are not an independent estimate of detection accuracy. The full-pool
+report did not include the TA archive; its 50/50 result remains a separate cached
+replay until the Docker check below succeeds.
+
+On Windows, update this branch and run from Command Prompt:
+
+```cmd
+git fetch origin
+git switch --track origin/whitebox-v8-phorpiex-rescue
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\start_reviewer_v8_whitebox.ps1" -AgreementRescue -Port 8085
+```
+
+If this branch already exists locally, use `git switch whitebox-v8-phorpiex-rescue`
+and `git pull --ff-only origin whitebox-v8-phorpiex-rescue` instead of `--track`.
+Use `-Archive "C:\path\to\actual-archive.zip"` when the TA ZIP is not at the
+default Downloads filename. Existing services are left running.
+
+The new container uses the existing final v8 image, overlays only the optional
+cascade code and shared rescue policy, and retains the fixed t060 model.
+Startup requires the exact passing full-pool proof. The rule remains disabled
+unless the rescue-specific entrypoint option is passed. Raw reviewer scores are
+preserved; the diagnostic response separately records when a verdict is rescued.
+The scorer independently checks the rule, fixed tree scores, public decisions,
+all labels and sample hashes. Expected result: 50/50 malware, 50/50 benign and
+exactly one rescue. Root filesystem and code/sample mounts are read-only; only
+the report directory is writable. Samples are read in memory, not executed.
+
+Send `whitebox-v8-rescue.json` from the printed output folder. This verifies the
+candidate runtime, not a standalone packaged ZIP or a new clean build.
 
 ## Fixed hypothesis
 
@@ -44,13 +88,13 @@ These overlapping historical reports are not independent test cohorts. Only
 the 618-row report contains matched fixed structural-primary scores; it is
 reported separately without pooling accuracy.
 
-The [preview evidence](evidence/phorpiex-rescue-preview.json) records input
-hashes and exact paired changes. Its full development-pool fields are null;
-it is explicitly not ready for runtime testing yet. The hypothesis has not
+The initial [preview evidence](evidence/phorpiex-rescue-preview.json) records
+input hashes and exact paired changes. It predates the full-pool check; its
+null pool fields are superseded by the preserved passing report above. The hypothesis has not
 been tested on untouched Phorpiex variants. There is no population-level
 false-positive guarantee, and t060's inherited 5/526 historical errors remain.
 
-## Required next check on the VM
+## Reproduce the completed full-pool check on the VM
 
 The VM holds the full final-export feature cache. From its repository:
 
