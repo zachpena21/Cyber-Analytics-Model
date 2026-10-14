@@ -45,8 +45,16 @@ try {
         "--mount", "type=bind,source=$Archive,target=/tests/ta-samples.zip,readonly", $Image)).Trim()
     $ready = $false
     while ($clock.Elapsed.TotalSeconds -lt 25) {
-        & docker exec $container python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=1)" 2>$null
-        if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+        $probeExit = 1
+        try {
+            & docker exec $container python /checks/check_http_ready.py 2>$null
+            $probeExit = $LASTEXITCODE
+        } catch {
+            # Windows PowerShell can promote native stderr into a terminating
+            # NativeCommandError. A failed probe must not bypass the retry loop.
+            $probeExit = 1
+        }
+        if ($probeExit -eq 0) { $ready = $true; break }
         Start-Sleep -Milliseconds 500
     }
     if (-not $ready) { throw "Restricted startup exceeded 25 seconds" }
