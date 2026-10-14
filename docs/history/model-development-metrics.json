@@ -1,0 +1,301 @@
+{
+  "reviewer_v1": {
+    "source": "defender/defender/models/boundary_reviewer/metadata.json",
+    "source_sha256": "bf2145408cfd3a83866b383c2035e3bc423e0fe604af5749ea5faf03f75d74a5",
+    "feature_count": 53,
+    "route_min": 0.5,
+    "reviewer_threshold": 0.6831506122881276,
+    "calibration": {
+      "benign": 1000,
+      "count": 1020,
+      "fn": 1,
+      "fnr": 0.05,
+      "fp": 0,
+      "fpr": 0.0,
+      "malicious": 20,
+      "tpr": 0.95
+    },
+    "adapter_control": {
+      "benign": 1000,
+      "count": 1020,
+      "fn": 1,
+      "fnr": 0.05,
+      "fp": 5,
+      "fpr": 0.005,
+      "malicious": 20,
+      "tpr": 0.95
+    }
+  },
+  "reviewer_v2": {
+    "source": "defender/defender/models/boundary_reviewer_v2_candidate/metadata.json",
+    "source_sha256": "97de64e2a2a1efb9cceb04356510d878d5add674022519deba08b921161b2272",
+    "feature_count": 53,
+    "route_min": 0.5,
+    "reviewer_threshold": 0.3263099058569006,
+    "calibration": {
+      "benign": 966,
+      "count": 1000,
+      "fn": 0,
+      "fnr": 0.0,
+      "fp": 0,
+      "fpr": 0.0,
+      "malicious": 34,
+      "tpr": 1.0
+    },
+    "adapter_control": {
+      "benign": 966,
+      "count": 1000,
+      "fn": 1,
+      "fnr": 0.029411764705882353,
+      "fp": 27,
+      "fpr": 0.027950310559006212,
+      "malicious": 34,
+      "tpr": 0.9705882352941176
+    }
+  },
+  "reviewer_v3": {
+    "source": "defender/defender/models/boundary_reviewer_v3_candidate/metadata.json",
+    "source_sha256": "7806d3c4efffe871c267bc804b685d47ad5416d6c9bb7710cd05a55fbb1009c8",
+    "feature_count": 54,
+    "route_min": 0.5,
+    "reviewer_threshold": 0.4852782217812828,
+    "calibration": {
+      "benign": 1166,
+      "count": 1202,
+      "fn": 0,
+      "fnr": 0.0,
+      "fp": 1,
+      "fpr": 0.0008576329331046312,
+      "malicious": 36,
+      "tpr": 1.0
+    },
+    "adapter_control": {
+      "benign": 1166,
+      "count": 1202,
+      "fn": 0,
+      "fnr": 0.0,
+      "fp": 61,
+      "fpr": 0.05231560891938251,
+      "malicious": 36,
+      "tpr": 1.0
+    }
+  },
+  "reviewer_v5": {
+    "source": "defender/defender/models/boundary_reviewer_v5_candidate/metadata.json",
+    "source_sha256": "471facf3dec283e95b9cf87fd778f2bda807a533c779b0df06dc8e8db2f2aab1",
+    "feature_count": 54,
+    "route_min": 0.3,
+    "reviewer_threshold": 0.4870135287958894,
+    "calibration": {
+      "benign": 1566,
+      "count": 1604,
+      "fn": 0,
+      "fnr": 0.0,
+      "fp": 11,
+      "fpr": 0.0070242656449553,
+      "malicious": 38,
+      "tpr": 1.0
+    },
+    "adapter_control": {
+      "benign": 1566,
+      "count": 1604,
+      "fn": 0,
+      "fnr": 0.0,
+      "fp": 97,
+      "fpr": 0.06194125159642401,
+      "malicious": 38,
+      "tpr": 1.0
+    }
+  },
+  "reviewer_v6_1": {
+    "source": "defender/defender/models/boundary_reviewer_v6_1_candidate/metadata.json",
+    "source_sha256": "221ecfb771605e27f7e884379cc696f23b84022fc93d931704680733156c38b9",
+    "feature_count": 66,
+    "route_min": 0.2,
+    "reviewer_threshold": 0.6905770973703483,
+    "calibration": {
+      "benign": 1766,
+      "count": 1808,
+      "fn": 4,
+      "fnr": 0.09523809523809523,
+      "fp": 1,
+      "fpr": 0.0005662514156285391,
+      "malicious": 42,
+      "tpr": 0.9047619047619048
+    },
+    "adapter_control": null,
+    "source_holdouts": [
+      {
+        "source": "reviewer-v4-v9-dev",
+        "heldout": {
+          "benign": 1000,
+          "count": 1003,
+          "fn": 0,
+          "fnr": 0.0,
+          "fp": 0,
+          "fpr": 0.0,
+          "malicious": 3,
+          "tpr": 1.0
+        }
+      },
+      {
+        "source": "reviewer-v5-v10-diagnostic",
+        "heldout": {
+          "benign": 1000,
+          "count": 1020,
+          "fn": 4,
+          "fnr": 0.2,
+          "fp": 1,
+          "fpr": 0.001,
+          "malicious": 20,
+          "tpr": 0.8
+        }
+      }
+    ]
+  },
+  "reviewer_v7": {
+    "source": "defender/defender/models/boundary_reviewer_v7_gbdt_candidate/metadata.json",
+    "source_sha256": "ec24c06deb66bd2de63c9128e85d86718d7f2d558bc6e05d4d322eba40a34379",
+    "feature_count": 66,
+    "route_min": 0.15,
+    "reviewer_threshold": 0.6312998096487621,
+    "calibration": {
+      "benign": 1766,
+      "count": 1808,
+      "fn": 1,
+      "fnr": 0.023809523809523808,
+      "fp": 1,
+      "fpr": 0.0005662514156285391,
+      "malicious": 42,
+      "tpr": 0.9761904761904762
+    },
+    "adapter_control": null,
+    "source_holdouts": [
+      {
+        "source": "reviewer-v4-v9-dev",
+        "heldout": {
+          "benign": 1000,
+          "count": 1003,
+          "fn": 0,
+          "fnr": 0.0,
+          "fp": 9,
+          "fpr": 0.009,
+          "malicious": 3,
+          "tpr": 1.0
+        }
+      },
+      {
+        "source": "reviewer-v5-v10-diagnostic",
+        "heldout": {
+          "benign": 1000,
+          "count": 1020,
+          "fn": 2,
+          "fnr": 0.1,
+          "fp": 0,
+          "fpr": 0.0,
+          "malicious": 20,
+          "tpr": 0.9
+        }
+      }
+    ]
+  },
+  "reviewer_v4": {
+    "source_commit": "f6a04bbd37c65afcc3394cbe99c92f1e142c4a90",
+    "source_path": "defender/defender/models/boundary_reviewer_v4_candidate/metadata.json",
+    "source_sha256": "e8d1ea5c2217d9aacd147e99ac231352a9258959e246061f5c97b9c213070436",
+    "feature_count": 54,
+    "route_min": 0.5,
+    "reviewer_threshold": 0.4121798812058857,
+    "calibration": {
+      "benign": 1366,
+      "count": 1403,
+      "fn": 0,
+      "fnr": 0.0,
+      "fp": 1,
+      "fpr": 0.0007320644216691069,
+      "malicious": 37,
+      "tpr": 1.0
+    },
+    "adapter_control": {
+      "benign": 1366,
+      "count": 1403,
+      "fn": 0,
+      "fnr": 0.0,
+      "fp": 80,
+      "fpr": 0.05856515373352855,
+      "malicious": 37,
+      "tpr": 1.0
+    }
+  },
+  "v8_runtime_aligned_refit": {
+    "source_uploaded_name": "metadata(8).json",
+    "source_sha256": "d2db03590572a90891c197bbe4e05276024d6f8a443d810507db1dd24d42a310",
+    "experiment": "boundary_reviewer_v8_runtime_aligned_data_baseline",
+    "calibration": {
+      "count": 2131,
+      "benign": 2084,
+      "malicious": 47,
+      "fp": 0,
+      "fn": 1,
+      "fpr": 0.0,
+      "tpr": 0.9787234042553191
+    },
+    "reviewer_threshold": 0.7250447982089809,
+    "runtime_parity_max_abs_error": 1.1102230246251565e-16
+  },
+  "v8_fixed_import_features": {
+    "source_uploaded_name": "metadata(9).json",
+    "source_sha256": "aca290bec336ea7547a9f7ed3daddf5e268a62f34236fea39285c3a8ab4edfa1",
+    "experiment": "boundary_reviewer_v8_fixed_import_features",
+    "calibration": {
+      "count": 2131,
+      "benign": 2084,
+      "malicious": 47,
+      "fp": 0,
+      "fn": 0,
+      "fpr": 0.0,
+      "tpr": 1.0
+    },
+    "reviewer_threshold": 0.639722991937624,
+    "runtime_parity_max_abs_error": 1.1102230246251565e-16,
+    "shared_calibration": {
+      "baseline": {
+        "count": 2131,
+        "benign": 2084,
+        "malicious": 47,
+        "fp": 0,
+        "fn": 1,
+        "fpr": 0.0,
+        "tpr": 0.9787234042553191
+      },
+      "import_candidate": {
+        "count": 2131,
+        "benign": 2084,
+        "malicious": 47,
+        "fp": 0,
+        "fn": 0,
+        "fpr": 0.0,
+        "tpr": 1.0
+      },
+      "baseline_at_original_threshold": {
+        "count": 2131,
+        "benign": 2084,
+        "malicious": 47,
+        "fp": 0,
+        "fn": 1,
+        "fpr": 0.0,
+        "tpr": 0.9787234042553191
+      },
+      "import_candidate_at_original_threshold": {
+        "count": 2131,
+        "benign": 2084,
+        "malicious": 47,
+        "fp": 0,
+        "fn": 0,
+        "fpr": 0.0,
+        "tpr": 1.0
+      }
+    }
+  },
+  "note": "Historical calibration panels differ across versions. Adapter-control comparisons within each row use the same panel. Source-held and TA-tuning results must not be pooled. This is a compact transcription of retained metadata, not a new evaluation."
+}
