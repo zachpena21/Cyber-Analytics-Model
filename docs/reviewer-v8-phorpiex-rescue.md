@@ -3,7 +3,7 @@
 This research experiment tries to recover the last disclosed Phorpiex miss
 without adding false positives relative to the passing threshold-0.60 candidate.
 That fallback remains unchanged. The rescue is now implemented as an optional
-Docker experiment; its raw-file runtime verification remains pending.
+Docker experiment; its raw-file runtime verification passed on all 100 TA files.
 
 ## Full development-pool result and Docker verification
 
@@ -19,19 +19,22 @@ cache hash. They record zero changed decisions across 13,245 files:
 See [the preserved report](evidence/phorpiex-rescue-full-pool.json).
 These inspected development results establish no new false positives on this
 pool; they are not an independent estimate of detection accuracy. The full-pool
-report did not include the TA archive; its 50/50 result remains a separate cached
-replay until the Docker check below succeeds.
+report did not include the TA archive. The subsequent raw-file Docker run
+confirmed 50/50 malware detections and zero benign errors, zero scoring errors,
+exactly one rescue, and a maximum recorded request time of 0.50 seconds. The
+model hash, all feature vectors, and the rescue policy were checked against
+t060; no other verdict changed. See the
+[runtime summary](evidence/whitebox-v8-rescue-runtime-summary.json).
 
-On Windows, update this branch and run from Command Prompt:
+To reproduce the Docker check on Windows, update main and run from Command Prompt:
 
 ```cmd
 git fetch origin
-git switch --track origin/whitebox-v8-phorpiex-rescue
+git switch main
+git pull --ff-only origin main
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\start_reviewer_v8_whitebox.ps1" -AgreementRescue -Port 8085
 ```
 
-If this branch already exists locally, use `git switch whitebox-v8-phorpiex-rescue`
-and `git pull --ff-only origin whitebox-v8-phorpiex-rescue` instead of `--track`.
 Use `-Archive "C:\path\to\actual-archive.zip"` when the TA ZIP is not at the
 default Downloads filename. Existing services are left running.
 
