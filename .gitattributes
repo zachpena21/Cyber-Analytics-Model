@@ -1,1 +1,2 @@
 submission/reviewer-v8-submission.zip filter=lfs diff=lfs merge=lfs -text
+submission/reviewer-v8-whitebox-submission.zip filter=lfs diff=lfs merge=lfs -text
