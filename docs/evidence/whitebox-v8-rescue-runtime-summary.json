@@ -1,0 +1,33 @@
+{
+  "complete": true,
+  "successful": 100,
+  "errors": 0,
+  "sample_count": 100,
+  "archive_sha256": "2dec402733745b9cfa13e61933a5c48a04fb3b36f672f5deba104c277731097c",
+  "model_sha256": "a9e350a04f77ff912486d45f9813b04dd686d5cae6661debd6eed316838d06e5",
+  "true_positives": 50,
+  "true_negatives": 50,
+  "detection_rate": 1.0,
+  "false_positive_rate": 0.0,
+  "accuracy": 1.0,
+  "agreement_rescue_count": 1,
+  "source_report_sha256": "2b15fbf67e05c55241d5d02f287fb83fe6d5ae9f4151ea9b7b879e43863a4ffe",
+  "source_report": "whitebox-v8-rescue.json",
+  "policy": {
+    "adapter_min": 0.99,
+    "base_benign_max": 0.2,
+    "exclude_verified_signatures": true,
+    "name": "v8-t060-agreement-rescue-research",
+    "require_adjusted_base_trigger": true,
+    "reviewer_min": 0.3,
+    "reviewer_threshold": 0.6,
+    "route_min": 0.15
+  },
+  "max_recorded_http_seconds": 0.5004999639995731,
+  "raw_file_runtime_verified": true,
+  "standalone_zip_qualified": false,
+  "changed_decision_sha256": [
+    "2a6ebbf3901296ecc772eaed7e22b5cfa0e2c316323ac5f74253f63b77823f31"
+  ],
+  "scope": "Disclosed TA tuning set. Raw-file Docker overlay runtime passed; standalone clean build and packaging remain pending."
+}

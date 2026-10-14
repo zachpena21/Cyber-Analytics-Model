@@ -4,7 +4,38 @@ A PE malware classifier for the course black-box defense project. The runtime
 combines a compact legacy random forest, a modern linear adapter, and an optional
 boundary reviewer. Training and diagnostics run separately from inference.
 
-## Current model status — October 13, 2026
+## Current whitebox work — October 14, 2026
+
+The [Phorpiex agreement rescue](docs/reviewer-v8-phorpiex-rescue.md) is the
+current whitebox development candidate. Its actual Docker runtime classified
+all 100 disclosed TA samples correctly: 50/50 malware, zero benign errors,
+zero scoring errors, and exactly one rescued verdict compared with t060.
+The slowest recorded diagnostic request was 0.50 seconds. See the
+[runtime evidence](docs/evidence/whitebox-v8-rescue-runtime-summary.json).
+The full development-pool check also passed: 41/12,764 benign errors and
+339/481 malware detections are unchanged, with zero added false positives.
+The TA set informed tuning; these results are not independent accuracy estimates.
+A standalone whitebox ZIP, clean-build and resource checks remain pending.
+
+The submitted v8 ZIP remains the frozen blackbox baseline. A separate
+[`0.60` threshold candidate](docs/reviewer-v8-whitebox-t060.md) preserves its
+weights and adapter route while lowering only the reviewer decision threshold.
+The t060 Docker run gave 49/50 malware detections and zero benign errors;
+the earlier 618-row cohort gives 75/92 detections and 5/526 benign errors (0.95%).
+This threshold-only fallback remains available separately from the rescue.
+
+| Branch | Purpose |
+|---|---|
+| `main` | Current whitebox Phorpiex rescue work and verified runtime workflow |
+| `checkpoint/blackbox-v8-submission` | Exact blackbox submission checkpoint at `c3d9228`, including the original LFS ZIP |
+| `whitebox-v8-threshold-060` | Threshold-only fallback at `1aaf7bb` |
+| `whitebox-v8-phorpiex-rescue` | Retained whitebox development history merged into main |
+
+The original `submission/reviewer-v8-submission.zip` remains the blackbox ZIP.
+The optional rescue workflow runs on port 8085; the threshold-only workflow runs
+on 8084. Neither replaces the archived ZIP or the default research Docker settings.
+
+## Submitted model status — October 13, 2026
 
 | Component | Current state |
 |---|---|

@@ -27,6 +27,14 @@ SCORE_ENDPOINT_ENABLED = os.getenv(
 
 
 def create_app(model, threshold: float) -> Flask:
+    rescue_enabled = bool(getattr(model, "reviewer_agreement_rescue", False))
+    if rescue_enabled:
+        from defender.reviewer_rescue import POLICY, predict as rescue_predict
+        reviewer = getattr(model, "boundary_reviewer", None)
+        if (reviewer is None or reviewer.threshold != POLICY['reviewer_threshold']
+                or reviewer.route_min != POLICY['route_min']
+                or hasattr(model, "modern_adapter_v2")):
+            raise ValueError("Agreement rescue requires the fixed t060 reviewer cascade")
     app = Flask(__name__)
     app.config.update(
         MODEL=model,
@@ -74,6 +82,8 @@ def create_app(model, threshold: float) -> Flask:
             details["reviewer_route_min"] = model.boundary_reviewer.route_min
             details["reviewer_threshold"] = model.boundary_reviewer.threshold
             details["reviewer_feature_diagnostics"] = True
+        if rescue_enabled:
+            details["reviewer_agreement_rescue"] = POLICY
         return jsonify(**details), 200
 
     def score_sample(bytez, include_features=False):
@@ -202,6 +212,17 @@ def create_app(model, threshold: float) -> Flask:
                 result = 0
                 adjusted_base_trigger = False
 
+        rescue_applied = False
+        if rescue_enabled and reviewer_routed:
+            before, after, rescue_applied = rescue_predict(dict(
+                adapter_probability=adapter_probability,
+                benign_probability=benign_probability,
+                base_trigger_adjusted=int(adjusted_base_trigger),
+                signature_verified=signature_verified,
+            ), reviewer_probability)
+            if before != result:
+                raise ValueError("Rescue baseline differs from reviewer decision")
+            result = after
         if result not in (0, 1):
             raise ValueError(f"model returned invalid label {result!r}")
         details = {
@@ -224,6 +245,8 @@ def create_app(model, threshold: float) -> Flask:
                 reviewer_probability=reviewer_probability,
                 reviewer_threshold=reviewer.threshold,
             )
+            if rescue_enabled:
+                details['reviewer_agreement_rescue_applied'] = rescue_applied
             if include_features:
                 details.update(
                     reviewer_feature_names=list(reviewer.feature_names),
